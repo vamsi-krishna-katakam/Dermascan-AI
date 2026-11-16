@@ -236,10 +236,8 @@ exports.getLiveStats = async (req, res) => {
     stream_url: '/api/scanner/video_feed',
     fps: simulatedFps,
     latency: simulatedLat,
-    detections: [
-      { class: "Vitiligo", confidence: 0.894, box: [100, 60, 520, 320] }
-    ],
-    counts: { "Vitiligo": 1 },
+    detections: [],
+    counts: {},
     gps: {
       latitude: 16.49433,
       longitude: 80.50128,

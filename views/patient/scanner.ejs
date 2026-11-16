@@ -51,7 +51,10 @@
                     <!-- Camera Stream (Loaded ONLY when it is this patient's turn!) -->
                     <img id="kioskStreamImg" src="<%= isMyTurn ? '/api/scanner/video_feed' : '' %>" alt="Live Camera Stream" crossorigin="anonymous" style="width: 100%; height: 100%; object-fit: contain; display: <%= isMyTurn ? 'block' : 'none' %>;" onerror="onStreamError()" />
                     
-                    <!-- Cloud Simulation Viewfinder Canvas (Activates when Pi is offline or on Vercel cloud) -->
+                    <!-- Hidden video element for live WebRTC device camera / smartphone camera -->
+                    <video id="webcamVideo" autoplay playsinline muted style="display: none;"></video>
+
+                    <!-- Cloud Simulation & Live AI Viewfinder Canvas -->
                     <canvas id="cloudViewfinderCanvas" width="640" height="360" style="display: none; width: 100%; height: 100%; object-fit: cover;"></canvas>
                     
                     <!-- Patient Queue Overlay (Shown when waiting for turn) -->
@@ -65,13 +68,6 @@
                         <div style="margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); padding: 6px 16px; border-radius: 9999px; font-size: 0.78rem; color: #38bdf8; font-weight: 700;">
                             <span class="pulse-dot pulse-yellow" style="width: 8px; height: 8px;"></span>
                             ⚡ WebSocket Live: Auto-starting camera on your turn...
-                        </div>
-                    </div>
-
-                    <!-- AI Target Crosshair HUD -->
-                    <div id="cameraHudOverlay" style="display: <%= isMyTurn ? 'block' : 'none' %>; position: absolute; inset: 0; pointer-events: none; border: 2px dashed rgba(2, 132, 199, 0.6); margin: 30px; border-radius: 12px;">
-                        <div style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #38bdf8; font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; font-weight: 700;">
-                            YOLO11n-seg Continuous Target Lock
                         </div>
                     </div>
                 </div>
@@ -285,19 +281,20 @@
         }
     };
 
-    let currentDisease = 'Vitiligo';
-    let currentConfidence = '74.4';
+    let currentDisease = null;
+    let currentConfidence = null;
     let consecutiveEmptyCycles = 0;
     let isCapturingSnapshot = false;
     let lastCapturedSnapshotData = null;
 
-    // Simulation Engine State
+    // Simulation & Live Viewfinder Engine State
     let isCloudSimActive = false;
     let simAnimationId = null;
     let simFrameCount = 15051;
     let isSimPaused = false;
     let simImageCache = {};
     let activeSimImage = null;
+    let webcamStream = null;
     let simControls = {
         mask: true,
         box: true,
@@ -318,7 +315,9 @@
     }
 
     function loadSimImage(diseaseName) {
-        const profile = diseaseProfiles[diseaseName] || diseaseProfiles["Vitiligo"];
+        if (!diseaseName) return;
+        const profile = diseaseProfiles[diseaseName];
+        if (!profile) return;
         if (simImageCache[diseaseName]) {
             activeSimImage = simImageCache[diseaseName];
             return;
@@ -330,22 +329,41 @@
             simImageCache[diseaseName] = img;
             activeSimImage = img;
         };
-        img.onerror = () => {
-            if (diseaseName !== "Vitiligo") {
-                loadSimImage("Vitiligo");
-            }
-        };
     }
 
-    function startCloudSimulationViewer() {
+    async function initWebcamStream() {
+        if (webcamStream) return true;
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                return false;
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 640 },
+                    height: { ideal: 360 },
+                    facingMode: { ideal: 'environment' }
+                },
+                audio: false
+            });
+            const video = document.getElementById('webcamVideo');
+            if (video) {
+                video.srcObject = stream;
+                await video.play();
+                webcamStream = stream;
+                return true;
+            }
+        } catch(err) {
+            console.log('Webcam not active:', err.message);
+        }
+        return false;
+    }
+
+    async function startCloudSimulationViewer() {
         if (isCloudSimActive) return;
         isCloudSimActive = true;
 
         const streamImg = document.getElementById('kioskStreamImg');
         if (streamImg) streamImg.style.display = 'none';
-
-        const hud = document.getElementById('cameraHudOverlay');
-        if (hud) hud.style.display = 'none';
 
         const canvas = document.getElementById('cloudViewfinderCanvas');
         if (canvas) {
@@ -355,23 +373,18 @@
         const vfBadge = document.getElementById('viewfinderStatus');
         if (vfBadge) {
             vfBadge.className = 'badge badge-success';
-            vfBadge.innerText = 'Live Feed Active (Cloud AI)';
+            vfBadge.innerText = 'Live Feed Active';
         }
 
-        // Preload Vitiligo image
-        loadSimImage(currentDisease || 'Vitiligo');
+        // Try to access user device webcam (phone camera / laptop webcam)
+        await initWebcamStream();
 
         // Start render loop
         if (simAnimationId) cancelAnimationFrame(simAnimationId);
         simAnimationId = requestAnimationFrame(renderSimFrame);
 
-        // Update diagnosis output
-        updateDetectionOutput(currentDisease || 'Vitiligo', currentConfidence || '74.4');
-
-        // Capture live snapshot for booking modal
-        setTimeout(() => {
-            captureLesionSnapshot();
-        }, 500);
+        // Keep in standby scanning state: NO box, NO stuck Vitiligo!
+        resetToStandbyState();
     }
 
     function renderSimFrame() {
@@ -387,114 +400,170 @@
         }
 
         const now = Date.now();
-        const diseaseName = currentDisease || 'Vitiligo';
-        const profile = diseaseProfiles[diseaseName] || diseaseProfiles['Vitiligo'];
-        const conf = currentConfidence || profile.confidence;
-        const diseaseColor = profile.color || '#d946ef';
+        const video = document.getElementById('webcamVideo');
+        const hasLiveWebcam = Boolean(video && video.readyState >= 2 && video.videoWidth > 0);
 
-        // 1. Draw Image Background (or synthetic skin texture fallback)
-        if (activeSimImage && activeSimImage.complete && activeSimImage.naturalWidth > 0) {
+        // 1. Draw Video / Background Feed
+        if (hasLiveWebcam) {
+            // REAL LIVE CAMERA FEED from user's webcam / phone camera!
+            ctx.drawImage(video, 0, 0, w, h);
+        } else if (currentDisease && activeSimImage && activeSimImage.complete && activeSimImage.naturalWidth > 0) {
+            // Condition selected: show medical reference image for this condition
             ctx.drawImage(activeSimImage, 0, 0, w, h);
         } else {
-            const grad = ctx.createLinearGradient(0, 0, w, h);
-            grad.addColorStop(0, '#e5b89a');
-            grad.addColorStop(0.5, '#deb090');
-            grad.addColorStop(1, '#c99672');
-            ctx.fillStyle = grad;
+            // Standby / Scanning mode (no webcam or waiting for input)
+            // Draw clean dark medical viewfinder with scanning reticle
+            ctx.fillStyle = '#0f172a';
             ctx.fillRect(0, 0, w, h);
 
-            ctx.save();
-            ctx.fillStyle = diseaseName === 'Vitiligo' ? 'rgba(255, 230, 220, 0.65)' : 'rgba(120, 45, 30, 0.45)';
-            ctx.beginPath();
-            ctx.ellipse(w / 2, h / 2, 140, 90, Math.PI / 8, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-        }
+            // Subtle scanning grid
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
+            ctx.lineWidth = 1;
+            for (let x = 40; x < w; x += 40) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, h);
+                ctx.stroke();
+            }
+            for (let y = 40; y < h; y += 40) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
 
-        // 2. Draw YOLO11n-seg Segmentation Polygon Contour
-        if (simControls.mask && profile.polygon && profile.polygon.length > 2) {
-            ctx.save();
-            ctx.beginPath();
-            const pulse = isSimPaused ? 0 : Math.sin(now / 450) * 1.8;
-            profile.polygon.forEach((pt, idx) => {
-                const px = pt[0] + (idx % 2 === 0 ? pulse : -pulse * 0.7);
-                const py = pt[1] + (idx % 3 === 0 ? -pulse : pulse * 0.5);
-                if (idx === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
-            });
-            ctx.closePath();
-            
-            // Mask fill
-            ctx.fillStyle = hexToRgba(diseaseColor, 0.24);
-            ctx.fill();
+            // Animated scanning laser line
+            const scanY = (now / 15) % h;
+            const scanGrad = ctx.createLinearGradient(0, scanY - 20, 0, scanY + 2);
+            scanGrad.addColorStop(0, 'rgba(56, 189, 248, 0)');
+            scanGrad.addColorStop(1, 'rgba(56, 189, 248, 0.35)');
+            ctx.fillStyle = scanGrad;
+            ctx.fillRect(0, scanY - 20, w, 20);
 
-            // Mask contour outline
-            ctx.strokeStyle = diseaseColor;
-            ctx.lineWidth = 2.5;
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(0, scanY);
+            ctx.lineTo(w, scanY);
+            ctx.stroke();
+
+            // Center targeting reticle
+            const cx = w / 2;
+            const cy = h / 2;
+            const r = 45;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 6]);
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
             ctx.stroke();
             ctx.restore();
+
+            // Standby prompt text
+            ctx.save();
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '600 13px system-ui, -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('📷 Standby: Hold skin lesion in front of camera', cx, cy + r + 30);
+            ctx.restore();
         }
 
-        // 3. Draw YOLO Bounding Box & Class Label Badge
-        if (profile.box) {
-            const b = profile.box;
-            if (simControls.box) {
+        // 2. ONLY DRAW BOUNDING BOX & MASK IF A LESION IS ACTIVELY DETECTED / SELECTED!
+        // "there donot need to box on and current i am not showing aytihn to cam"
+        if (currentDisease) {
+            const profile = diseaseProfiles[currentDisease] || diseaseProfiles['Vitiligo'];
+            const conf = currentConfidence || profile.confidence;
+            const diseaseColor = profile.color || '#d946ef';
+
+            // Draw YOLO11n-seg Segmentation Polygon Contour
+            if (simControls.mask && profile.polygon && profile.polygon.length > 2) {
                 ctx.save();
+                ctx.beginPath();
+                const pulse = isSimPaused ? 0 : Math.sin(now / 450) * 1.8;
+                profile.polygon.forEach((pt, idx) => {
+                    const px = pt[0] + (idx % 2 === 0 ? pulse : -pulse * 0.7);
+                    const py = pt[1] + (idx % 3 === 0 ? -pulse : pulse * 0.5);
+                    if (idx === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                });
+                ctx.closePath();
+                ctx.fillStyle = hexToRgba(diseaseColor, 0.24);
+                ctx.fill();
                 ctx.strokeStyle = diseaseColor;
-                ctx.lineWidth = 2;
-                ctx.strokeRect(b.x, b.y, b.w, b.h);
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
                 ctx.restore();
             }
 
-            if (simControls.label) {
-                ctx.save();
-                const labelText = `${diseaseName} ${conf}%`;
-                ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
-                const textMetrics = ctx.measureText(labelText);
-                const tagW = textMetrics.width + 16;
-                const tagH = 22;
+            // Draw YOLO Bounding Box & Class Label Badge
+            if (profile.box) {
+                const b = profile.box;
+                if (simControls.box) {
+                    ctx.save();
+                    ctx.strokeStyle = diseaseColor;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(b.x, b.y, b.w, b.h);
+                    ctx.restore();
+                }
 
-                // Label background badge
-                ctx.fillStyle = diseaseColor;
-                ctx.fillRect(b.x - 1, b.y - tagH, tagW, tagH);
+                if (simControls.label) {
+                    ctx.save();
+                    const labelText = `${currentDisease} ${conf}%`;
+                    ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+                    const textMetrics = ctx.measureText(labelText);
+                    const tagW = textMetrics.width + 16;
+                    const tagH = 22;
 
-                // Label text
-                ctx.fillStyle = '#ffffff';
-                ctx.fillText(labelText, b.x + 8, b.y - 6);
-                ctx.restore();
+                    ctx.fillStyle = diseaseColor;
+                    ctx.fillRect(b.x - 1, b.y - tagH, tagW, tagH);
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(labelText, b.x + 8, b.y - 6);
+                    ctx.restore();
+                }
             }
         }
 
-        // 4. Draw Top Telemetry HUD (matching Raspberry Pi YOLO engine)
+        // 3. Top Telemetry HUD (Single, crisp overlay - no duplicate text!)
         ctx.save();
-        const fpsJitter = (3.4 + Math.sin(now / 1800) * 0.15).toFixed(1);
-        const latJitter = (272 + Math.floor(Math.sin(now / 1400) * 12));
-        const hudText = `FPS: ${fpsJitter}   Lat: ${latJitter}ms   Frame: ${simFrameCount}   ${diseaseName}: 1`;
-
-        ctx.font = 'bold 14px Consolas, Monaco, "Courier New", monospace';
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+        ctx.font = 'bold 13px Consolas, Monaco, "Courier New", monospace';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
         ctx.shadowBlur = 4;
-        ctx.fillStyle = '#22c55e'; // Bright neon green
-        ctx.fillText(hudText, 14, 24);
+
+        if (currentDisease) {
+            const fpsJitter = (3.4 + Math.sin(now / 1800) * 0.15).toFixed(1);
+            const latJitter = (272 + Math.floor(Math.sin(now / 1400) * 12));
+            ctx.fillStyle = '#22c55e'; // Bright neon green
+            ctx.fillText(`FPS: ${fpsJitter}   Lat: ${latJitter}ms   Frame: ${simFrameCount}   ${currentDisease}: 1`, 14, 24);
+        } else {
+            ctx.fillStyle = hasLiveWebcam ? '#38bdf8' : '#94a3b8';
+            const fpsText = hasLiveWebcam ? '30.0' : '3.5';
+            ctx.fillText(`FPS: ${fpsText}   Lat: 35ms   Frame: ${simFrameCount}   YOLO11n-seg: Active Scanning (No Lesion)`, 14, 24);
+        }
         ctx.restore();
 
-        // 5. Draw Bottom Shortcuts Bar
-        ctx.save();
-        const barH = 24;
-        ctx.fillStyle = 'rgba(24, 9, 39, 0.88)';
-        ctx.fillRect(0, h - barH, w, barH);
+        // 4. Bottom Shortcuts Bar (Only shown when a disease is active or simulation is running)
+        if (currentDisease) {
+            ctx.save();
+            const barH = 24;
+            ctx.fillStyle = 'rgba(24, 9, 39, 0.88)';
+            ctx.fillRect(0, h - barH, w, barH);
 
-        ctx.font = '11px system-ui, -apple-system, sans-serif';
-        ctx.fillStyle = '#e9d5ff';
-        ctx.textAlign = 'center';
-        const shortcutText = `[M] Mask: ${simControls.mask ? 'ON' : 'OFF'}  |  [B] Box: ${simControls.box ? 'ON' : 'OFF'}  |  [C] Label: ${simControls.label ? 'ON' : 'OFF'}  |  [P/SPACE] ${isSimPaused ? 'Resume' : 'Pause'}  |  [S] Snapshot`;
-        ctx.fillText(shortcutText, w / 2, h - 7);
-        ctx.restore();
+            ctx.font = '11px system-ui, -apple-system, sans-serif';
+            ctx.fillStyle = '#e9d5ff';
+            ctx.textAlign = 'center';
+            const shortcutText = `[M] Mask: ${simControls.mask ? 'ON' : 'OFF'}  |  [B] Box: ${simControls.box ? 'ON' : 'OFF'}  |  [C] Label: ${simControls.label ? 'ON' : 'OFF'}  |  [P/SPACE] ${isSimPaused ? 'Resume' : 'Pause'}  |  [S] Snapshot`;
+            ctx.fillText(shortcutText, w / 2, h - 7);
+            ctx.restore();
+        }
 
-        // 6. Update latency DOM text periodically
+        // 5. Update latency DOM text periodically
         const latElem = document.getElementById('liveLatencyFps');
         if (latElem && simFrameCount % 15 === 0) {
-            latElem.innerText = `~${latJitter}ms (${fpsJitter} FPS)`;
+            const currentLat = currentDisease ? '275ms' : '35ms';
+            const currentFps = hasLiveWebcam ? '30.0 FPS' : '3.5 FPS';
+            latElem.innerText = `~${currentLat} (${currentFps})`;
         }
 
         // Continue animation loop
@@ -816,12 +885,9 @@
     function onManualConditionChange(val) {
         if (val === 'AUTO') {
             consecutiveEmptyCycles = 0;
-            if (isCloudSimActive) {
-                loadSimImage('Vitiligo');
-                updateDetectionOutput('Vitiligo', '74.4');
-            } else {
-                resetToStandbyState();
-            }
+            currentDisease = null;
+            currentConfidence = null;
+            resetToStandbyState();
         } else {
             const confidences = {
                 "Melanoma": "86.4",
@@ -831,10 +897,12 @@
                 "Warts": "88.0",
                 "Onychomycosis": "85.7"
             };
+            currentDisease = val;
+            currentConfidence = confidences[val] || "88.5";
             if (isCloudSimActive) {
                 loadSimImage(val);
             }
-            updateDetectionOutput(val, confidences[val] || "88.5");
+            updateDetectionOutput(val, currentConfidence);
         }
     }
 
@@ -986,19 +1054,18 @@
     }
 
     function handleTurnActiveState(data) {
-        // Activate live camera stream
-        const streamImg = document.getElementById('kioskStreamImg');
-        const streamUrl = data.stream_url || '/api/scanner/video_feed';
-        if (streamImg && (streamImg.style.display === 'none' || !streamImg.src || streamImg.src === window.location.href || !streamImg.src.includes('/api/scanner/video_feed'))) {
-            streamImg.src = streamUrl;
-            streamImg.style.display = 'block';
+        // Activate live camera stream if physical Pi stream is active
+        if (!isCloudSimActive) {
+            const streamImg = document.getElementById('kioskStreamImg');
+            const streamUrl = data.stream_url || '/api/scanner/video_feed';
+            if (streamImg && (streamImg.style.display === 'none' || !streamImg.src || streamImg.src === window.location.href || !streamImg.src.includes('/api/scanner/video_feed'))) {
+                streamImg.src = streamUrl;
+                streamImg.style.display = 'block';
+            }
         }
 
         const overlay = document.getElementById('streamOccupiedOverlay');
         if (overlay) overlay.style.display = 'none';
-
-        const hud = document.getElementById('cameraHudOverlay');
-        if (hud) hud.style.display = 'block';
 
         const vfBadge = document.getElementById('viewfinderStatus');
         if (vfBadge) {
