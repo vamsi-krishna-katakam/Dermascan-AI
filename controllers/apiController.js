@@ -51,8 +51,7 @@ exports.getVideoStreamProxy = (req, res) => {
     hostname: '10.189.102.108',
     port: 5000,
     path: '/video_feed',
-    method: 'GET',
-    timeout: 3000
+    method: 'GET'
   };
 
   if (customUrl) {
@@ -63,8 +62,7 @@ exports.getVideoStreamProxy = (req, res) => {
         hostname: parsed.hostname,
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
         path: parsed.pathname + (parsed.search || ''),
-        method: 'GET',
-        timeout: 10000
+        method: 'GET'
       };
     } catch (e) {}
   }

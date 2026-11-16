@@ -48,14 +48,8 @@
             </div>
             <div class="card-body">
                 <div style="position: relative; width: 100%; height: 340px; background: #000; border-radius: var(--radius-md); overflow: hidden; display: flex; align-items: center; justify-content: center;">
-                    <!-- Camera Stream (Loaded ONLY when it is this patient's turn!) -->
-                    <img id="kioskStreamImg" src="<%= isMyTurn ? '/api/scanner/video_feed' : '' %>" alt="Live Camera Stream" crossorigin="anonymous" style="width: 100%; height: 100%; object-fit: contain; display: <%= isMyTurn ? 'block' : 'none' %>;" onerror="onStreamError()" />
-                    
-                    <!-- Hidden video element for live WebRTC device camera / smartphone camera -->
-                    <video id="webcamVideo" autoplay playsinline muted style="display: none;"></video>
-
-                    <!-- Cloud Simulation & Live AI Viewfinder Canvas -->
-                    <canvas id="cloudViewfinderCanvas" width="640" height="360" style="display: none; width: 100%; height: 100%; object-fit: cover;"></canvas>
+                    <!-- Camera Stream from Raspberry Pi 5 (Direct Live MJPEG Feed) -->
+                    <img id="kioskStreamImg" src="<%= isMyTurn ? '/api/scanner/video_feed' : '' %>" alt="Live Raspberry Pi Camera Stream" crossorigin="anonymous" style="width: 100%; height: 100%; object-fit: contain; display: <%= isMyTurn ? 'block' : 'none' %>;" onerror="onStreamError()" />
                     
                     <!-- Patient Queue Overlay (Shown when waiting for turn) -->
                     <div id="streamOccupiedOverlay" style="display: <%= isMyTurn ? 'none' : 'flex' %>; position: absolute; inset: 0; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 10;">
@@ -217,378 +211,11 @@
         "Onychomycosis": "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=600&auto=format&fit=crop&q=80"
     };
 
-    const diseaseProfiles = {
-        "Vitiligo": {
-            confidence: "74.4",
-            color: "#d946ef",
-            imgSrc: "/uploads/cases/lesion_CASE-917_1794857738201.jpg",
-            box: { x: 50, y: 45, w: 540, h: 275 },
-            polygon: [
-                [70, 70], [120, 65], [170, 75], [210, 115], [240, 80],
-                [310, 85], [380, 100], [450, 88], [520, 95], [580, 130],
-                [570, 270], [420, 290], [280, 305], [140, 295], [75, 270], [65, 170]
-            ]
-        },
-        "Melanoma": {
-            confidence: "86.4",
-            color: "#ef4444",
-            imgSrc: "https://images.unsplash.com/photo-1576765608535-5f04d1e3f289?w=640&auto=format&fit=crop&q=80",
-            box: { x: 180, y: 75, w: 280, h: 215 },
-            polygon: [
-                [230, 95], [310, 85], [380, 105], [435, 155], [425, 225],
-                [365, 265], [285, 255], [215, 215], [195, 155], [210, 115]
-            ]
-        },
-        "Eczema": {
-            confidence: "89.2",
-            color: "#f97316",
-            imgSrc: "https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=640&auto=format&fit=crop&q=80",
-            box: { x: 130, y: 65, w: 380, h: 235 },
-            polygon: [
-                [150, 110], [230, 85], [340, 80], [430, 115], [470, 175],
-                [450, 245], [360, 275], [240, 265], [160, 215], [140, 155]
-            ]
-        },
-        "Acne": {
-            confidence: "94.1",
-            color: "#0284c7",
-            imgSrc: "https://images.unsplash.com/photo-1579684385127-1ef15d508118?w=640&auto=format&fit=crop&q=80",
-            box: { x: 180, y: 85, w: 280, h: 195 },
-            polygon: [
-                [230, 105], [300, 100], [360, 125], [400, 175], [380, 235],
-                [310, 255], [240, 245], [200, 195], [205, 145]
-            ]
-        },
-        "Warts": {
-            confidence: "88.0",
-            color: "#8b5cf6",
-            imgSrc: "https://images.unsplash.com/photo-1628771065518-0d82f1938462?w=640&auto=format&fit=crop&q=80",
-            box: { x: 200, y: 95, w: 240, h: 185 },
-            polygon: [
-                [250, 115], [320, 110], [380, 135], [400, 185], [370, 235],
-                [300, 250], [240, 230], [220, 175]
-            ]
-        },
-        "Onychomycosis": {
-            confidence: "85.7",
-            color: "#10b981",
-            imgSrc: "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=640&auto=format&fit=crop&q=80",
-            box: { x: 160, y: 85, w: 320, h: 205 },
-            polygon: [
-                [200, 115], [270, 95], [350, 100], [410, 135], [430, 205],
-                [370, 255], [280, 265], [210, 235], [185, 170]
-            ]
-        }
-    };
-
     let currentDisease = null;
     let currentConfidence = null;
     let consecutiveEmptyCycles = 0;
     let isCapturingSnapshot = false;
     let lastCapturedSnapshotData = null;
-
-    // Simulation & Live Viewfinder Engine State
-    let isCloudSimActive = false;
-    let simAnimationId = null;
-    let simFrameCount = 15051;
-    let isSimPaused = false;
-    let simImageCache = {};
-    let activeSimImage = null;
-    let webcamStream = null;
-    let simControls = {
-        mask: true,
-        box: true,
-        label: true
-    };
-
-    function hexToRgba(hex, alpha) {
-        let c;
-        if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
-            c = hex.substring(1).split('');
-            if (c.length === 3) {
-                c = [c[0], c[0], c[1], c[1], c[2], c[2]];
-            }
-            c = '0x' + c.join('');
-            return 'rgba(' + [(c >> 16) & 255, (c >> 8) & 255, c & 255].join(',') + ',' + alpha + ')';
-        }
-        return 'rgba(217, 70, 239, ' + alpha + ')';
-    }
-
-    function loadSimImage(diseaseName) {
-        if (!diseaseName) return;
-        const profile = diseaseProfiles[diseaseName];
-        if (!profile) return;
-        if (simImageCache[diseaseName]) {
-            activeSimImage = simImageCache[diseaseName];
-            return;
-        }
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = profile.imgSrc;
-        img.onload = () => {
-            simImageCache[diseaseName] = img;
-            activeSimImage = img;
-        };
-    }
-
-    async function initWebcamStream() {
-        if (webcamStream) return true;
-        try {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                return false;
-            }
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    width: { ideal: 640 },
-                    height: { ideal: 360 },
-                    facingMode: { ideal: 'environment' }
-                },
-                audio: false
-            });
-            const video = document.getElementById('webcamVideo');
-            if (video) {
-                video.srcObject = stream;
-                await video.play();
-                webcamStream = stream;
-                return true;
-            }
-        } catch(err) {
-            console.log('Webcam not active:', err.message);
-        }
-        return false;
-    }
-
-    async function startCloudSimulationViewer() {
-        if (isCloudSimActive) return;
-        isCloudSimActive = true;
-
-        const streamImg = document.getElementById('kioskStreamImg');
-        if (streamImg) streamImg.style.display = 'none';
-
-        const canvas = document.getElementById('cloudViewfinderCanvas');
-        if (canvas) {
-            canvas.style.display = 'block';
-        }
-
-        const vfBadge = document.getElementById('viewfinderStatus');
-        if (vfBadge) {
-            vfBadge.className = 'badge badge-success';
-            vfBadge.innerText = 'Live Feed Active';
-        }
-
-        // Try to access user device webcam (phone camera / laptop webcam)
-        await initWebcamStream();
-
-        // Start render loop
-        if (simAnimationId) cancelAnimationFrame(simAnimationId);
-        simAnimationId = requestAnimationFrame(renderSimFrame);
-
-        // Keep in standby scanning state: NO box, NO stuck Vitiligo!
-        resetToStandbyState();
-    }
-
-    function renderSimFrame() {
-        if (!isCloudSimActive) return;
-        const canvas = document.getElementById('cloudViewfinderCanvas');
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        const w = canvas.width;
-        const h = canvas.height;
-
-        if (!isSimPaused) {
-            simFrameCount++;
-        }
-
-        const now = Date.now();
-        const video = document.getElementById('webcamVideo');
-        const hasLiveWebcam = Boolean(video && video.readyState >= 2 && video.videoWidth > 0);
-
-        // 1. Draw Video / Background Feed
-        if (hasLiveWebcam) {
-            // REAL LIVE CAMERA FEED from user's webcam / phone camera!
-            ctx.drawImage(video, 0, 0, w, h);
-        } else if (currentDisease && activeSimImage && activeSimImage.complete && activeSimImage.naturalWidth > 0) {
-            // Condition selected: show medical reference image for this condition
-            ctx.drawImage(activeSimImage, 0, 0, w, h);
-        } else {
-            // Standby / Scanning mode (no webcam or waiting for input)
-            // Draw clean dark medical viewfinder with scanning reticle
-            ctx.fillStyle = '#0f172a';
-            ctx.fillRect(0, 0, w, h);
-
-            // Subtle scanning grid
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
-            ctx.lineWidth = 1;
-            for (let x = 40; x < w; x += 40) {
-                ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, h);
-                ctx.stroke();
-            }
-            for (let y = 40; y < h; y += 40) {
-                ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(w, y);
-                ctx.stroke();
-            }
-
-            // Animated scanning laser line
-            const scanY = (now / 15) % h;
-            const scanGrad = ctx.createLinearGradient(0, scanY - 20, 0, scanY + 2);
-            scanGrad.addColorStop(0, 'rgba(56, 189, 248, 0)');
-            scanGrad.addColorStop(1, 'rgba(56, 189, 248, 0.35)');
-            ctx.fillStyle = scanGrad;
-            ctx.fillRect(0, scanY - 20, w, 20);
-
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(0, scanY);
-            ctx.lineTo(w, scanY);
-            ctx.stroke();
-
-            // Center targeting reticle
-            const cx = w / 2;
-            const cy = h / 2;
-            const r = 45;
-            ctx.save();
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([6, 6]);
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-
-            // Standby prompt text
-            ctx.save();
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '600 13px system-ui, -apple-system, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('📷 Standby: Hold skin lesion in front of camera', cx, cy + r + 30);
-            ctx.restore();
-        }
-
-        // 2. ONLY DRAW BOUNDING BOX & MASK IF A LESION IS ACTIVELY DETECTED / SELECTED!
-        // "there donot need to box on and current i am not showing aytihn to cam"
-        if (currentDisease) {
-            const profile = diseaseProfiles[currentDisease] || diseaseProfiles['Vitiligo'];
-            const conf = currentConfidence || profile.confidence;
-            const diseaseColor = profile.color || '#d946ef';
-
-            // Draw YOLO11n-seg Segmentation Polygon Contour
-            if (simControls.mask && profile.polygon && profile.polygon.length > 2) {
-                ctx.save();
-                ctx.beginPath();
-                const pulse = isSimPaused ? 0 : Math.sin(now / 450) * 1.8;
-                profile.polygon.forEach((pt, idx) => {
-                    const px = pt[0] + (idx % 2 === 0 ? pulse : -pulse * 0.7);
-                    const py = pt[1] + (idx % 3 === 0 ? -pulse : pulse * 0.5);
-                    if (idx === 0) ctx.moveTo(px, py);
-                    else ctx.lineTo(px, py);
-                });
-                ctx.closePath();
-                ctx.fillStyle = hexToRgba(diseaseColor, 0.24);
-                ctx.fill();
-                ctx.strokeStyle = diseaseColor;
-                ctx.lineWidth = 2.5;
-                ctx.stroke();
-                ctx.restore();
-            }
-
-            // Draw YOLO Bounding Box & Class Label Badge
-            if (profile.box) {
-                const b = profile.box;
-                if (simControls.box) {
-                    ctx.save();
-                    ctx.strokeStyle = diseaseColor;
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(b.x, b.y, b.w, b.h);
-                    ctx.restore();
-                }
-
-                if (simControls.label) {
-                    ctx.save();
-                    const labelText = `${currentDisease} ${conf}%`;
-                    ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
-                    const textMetrics = ctx.measureText(labelText);
-                    const tagW = textMetrics.width + 16;
-                    const tagH = 22;
-
-                    ctx.fillStyle = diseaseColor;
-                    ctx.fillRect(b.x - 1, b.y - tagH, tagW, tagH);
-
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillText(labelText, b.x + 8, b.y - 6);
-                    ctx.restore();
-                }
-            }
-        }
-
-        // 3. Top Telemetry HUD (Single, crisp overlay - no duplicate text!)
-        ctx.save();
-        ctx.font = 'bold 13px Consolas, Monaco, "Courier New", monospace';
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-        ctx.shadowBlur = 4;
-
-        if (currentDisease) {
-            const fpsJitter = (3.4 + Math.sin(now / 1800) * 0.15).toFixed(1);
-            const latJitter = (272 + Math.floor(Math.sin(now / 1400) * 12));
-            ctx.fillStyle = '#22c55e'; // Bright neon green
-            ctx.fillText(`FPS: ${fpsJitter}   Lat: ${latJitter}ms   Frame: ${simFrameCount}   ${currentDisease}: 1`, 14, 24);
-        } else {
-            ctx.fillStyle = hasLiveWebcam ? '#38bdf8' : '#94a3b8';
-            const fpsText = hasLiveWebcam ? '30.0' : '3.5';
-            ctx.fillText(`FPS: ${fpsText}   Lat: 35ms   Frame: ${simFrameCount}   YOLO11n-seg: Active Scanning (No Lesion)`, 14, 24);
-        }
-        ctx.restore();
-
-        // 4. Bottom Shortcuts Bar (Only shown when a disease is active or simulation is running)
-        if (currentDisease) {
-            ctx.save();
-            const barH = 24;
-            ctx.fillStyle = 'rgba(24, 9, 39, 0.88)';
-            ctx.fillRect(0, h - barH, w, barH);
-
-            ctx.font = '11px system-ui, -apple-system, sans-serif';
-            ctx.fillStyle = '#e9d5ff';
-            ctx.textAlign = 'center';
-            const shortcutText = `[M] Mask: ${simControls.mask ? 'ON' : 'OFF'}  |  [B] Box: ${simControls.box ? 'ON' : 'OFF'}  |  [C] Label: ${simControls.label ? 'ON' : 'OFF'}  |  [P/SPACE] ${isSimPaused ? 'Resume' : 'Pause'}  |  [S] Snapshot`;
-            ctx.fillText(shortcutText, w / 2, h - 7);
-            ctx.restore();
-        }
-
-        // 5. Update latency DOM text periodically
-        const latElem = document.getElementById('liveLatencyFps');
-        if (latElem && simFrameCount % 15 === 0) {
-            const currentLat = currentDisease ? '275ms' : '35ms';
-            const currentFps = hasLiveWebcam ? '30.0 FPS' : '3.5 FPS';
-            latElem.innerText = `~${currentLat} (${currentFps})`;
-        }
-
-        // Continue animation loop
-        simAnimationId = requestAnimationFrame(renderSimFrame);
-    }
-
-    // Keyboard Shortcuts for Viewfinder HUD
-    document.addEventListener('keydown', (e) => {
-        if (!isCloudSimActive) return;
-        if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
-
-        const key = e.key.toLowerCase();
-        if (key === 'm') {
-            simControls.mask = !simControls.mask;
-        } else if (key === 'b') {
-            simControls.box = !simControls.box;
-        } else if (key === 'c') {
-            simControls.label = !simControls.label;
-        } else if (key === 'p' || e.code === 'Space') {
-            e.preventDefault();
-            isSimPaused = !isSimPaused;
-        } else if (key === 's') {
-            captureLesionSnapshot();
-        }
-    });
 
     // Helper: Case-insensitive / fuzzy match for disease classes
     function findRemedy(name) {
@@ -603,20 +230,10 @@
         return null;
     }
 
-    // Initialize WebSocket queue & Cloud Viewfinder check on page load
+    // Initialize WebSocket queue & real-time Raspberry Pi polling on page load
     document.addEventListener('DOMContentLoaded', () => {
         initWebSocketQueue();
         startPollingFallback();
-
-        // Cloud & Stream Check: If running on Vercel or physical camera takes > 1500ms to load,
-        // switch instantly to Cloud Simulation Viewfinder so user NEVER sees a black box!
-        setTimeout(() => {
-            const streamImg = document.getElementById('kioskStreamImg');
-            if (streamImg && streamImg.style.display !== 'none' && streamImg.naturalWidth === 0) {
-                console.log('Stream inactive or on cloud environment. Activating Cloud Simulation Viewfinder.');
-                startCloudSimulationViewer();
-            }
-        }, 1500);
     });
 
     // =========================================================================
@@ -684,20 +301,7 @@
         if (isCapturingSnapshot) return;
         isCapturingSnapshot = true;
         try {
-            // Priority 1: Instant snapshot from Cloud Simulation Canvas if active
-            const cloudCanvas = document.getElementById('cloudViewfinderCanvas');
-            if (cloudCanvas && cloudCanvas.style.display !== 'none') {
-                try {
-                    const dataUrl = cloudCanvas.toDataURL('image/jpeg', 0.85);
-                    if (dataUrl && dataUrl.length > 500) {
-                        applySnapshotToUI(dataUrl);
-                        isCapturingSnapshot = false;
-                        return;
-                    }
-                } catch(canvasErr) {}
-            }
-
-            // Priority 2: Instant HTML5 Canvas snapshot from active live stream
+            // Priority 1: Instant HTML5 Canvas snapshot from active live stream
             const streamImg = document.getElementById('kioskStreamImg');
             if (streamImg && streamImg.style.display !== 'none' && streamImg.naturalWidth > 0) {
                 try {
@@ -1186,7 +790,7 @@
         }
     }
 
-    // Polling fallback
+    // Polling fallback: polls Raspberry Pi telemetry directly
     let pollingInterval = null;
     function startPollingFallback() {
         if (pollingInterval) return;
@@ -1197,20 +801,23 @@
                 const res = await fetch('/api/scanner/live-stats', { cache: 'no-store' });
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.is_simulation && !isCloudSimActive) {
-                        startCloudSimulationViewer();
-                    }
                     if (data.is_my_turn) {
                         handleTurnActiveState(data);
                     }
                     processDetectionPayload(data);
                 }
             } catch(e) {}
-        }, 1200);
+        }, 1000);
     }
 
     function onStreamError() {
-        startCloudSimulationViewer();
+        const img = document.getElementById('kioskStreamImg');
+        if (!img || img.style.display === 'none') return;
+        setTimeout(() => {
+            if (img.style.display !== 'none') {
+                img.src = '/api/scanner/video_feed?t=' + Date.now();
+            }
+        }, 2000);
     }
 
     function openBookingFromBtn(btn) {
