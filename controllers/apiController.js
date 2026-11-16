@@ -45,7 +45,7 @@ exports.getVideoStreamProxy = (req, res) => {
     'Connection': 'close'
   });
 
-  const customUrl = process.env.RPI_STREAM_URL;
+  const customUrl = process.env.RPI_STREAM_URL || 'https://apollo-amendments-temple-spencer.trycloudflare.com/video_feed';
   let client = http;
   let reqOpts = {
     hostname: '10.189.102.108',
@@ -131,12 +131,8 @@ exports.getSnapshot = async (req, res) => {
   }
 
   const endpoints = [];
-  if (process.env.RPI_STREAM_URL) {
-    try {
-      const parsed = new URL(process.env.RPI_STREAM_URL);
-      endpoints.push(`${parsed.protocol}//${parsed.host}/snapshot.jpg`);
-    } catch(e) {}
-  }
+  const tunnelBase = process.env.RPI_STREAM_URL ? new URL(process.env.RPI_STREAM_URL).origin : 'https://apollo-amendments-temple-spencer.trycloudflare.com';
+  endpoints.push(`${tunnelBase}/snapshot.jpg`);
   endpoints.push('http://10.189.102.108:5000/snapshot.jpg', 'http://rpi.local:5000/snapshot.jpg');
 
   for (const url of endpoints) {
@@ -195,12 +191,8 @@ exports.getLiveStats = async (req, res) => {
 
   // Active patient: fetch live stats from Raspberry Pi (or custom RPI_STREAM_URL)
   const endpoints = [];
-  if (process.env.RPI_STREAM_URL) {
-    try {
-      const parsed = new URL(process.env.RPI_STREAM_URL);
-      endpoints.push(`${parsed.protocol}//${parsed.host}/api/stats`);
-    } catch(e) {}
-  }
+  const statsTunnelBase = process.env.RPI_STREAM_URL ? new URL(process.env.RPI_STREAM_URL).origin : 'https://apollo-amendments-temple-spencer.trycloudflare.com';
+  endpoints.push(`${statsTunnelBase}/api/stats`);
   endpoints.push('http://10.189.102.108:5000/api/stats', 'http://rpi.local:5000/api/stats');
 
   for (const url of endpoints) {
