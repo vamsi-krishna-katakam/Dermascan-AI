@@ -1,0 +1,27 @@
+    <footer>
+        Dermascan AI Autonomous Healthcare Platform • Powered by Node.js, Express & EJS Templates • Connected to Raspberry Pi 5 Skin Scanner
+    </footer>
+
+    <!-- Scanner Status Polling Script -->
+    <script>
+        // Poll scanner hardware status every 4 seconds to update top status pill
+        async function checkScannerStatus() {
+            try {
+                const res = await fetch('/api/scanner/status');
+                const data = await res.json();
+                const pillText = document.getElementById('globalKioskStatusText');
+                const dot = document.querySelector('#globalKioskPill .pulse-dot');
+                if (pillText && dot) {
+                    pillText.innerText = data.status + (data.status === 'In Use' ? ' (' + (data.current_patient || 'Occupied') + ')' : '');
+                    if (data.status === 'Available') {
+                        dot.className = 'pulse-dot pulse-green';
+                    } else {
+                        dot.className = 'pulse-dot pulse-yellow';
+                    }
+                }
+            } catch (e) {}
+        }
+        setInterval(checkScannerStatus, 4000);
+    </script>
+</body>
+</html>

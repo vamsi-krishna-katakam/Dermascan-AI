@@ -1,0 +1,16 @@
+{
+  "name": "dermascan-healthcare-app",
+  "version": "1.0.0",
+  "description": "Dermascan AI Healthcare Platform - Tele-Dermatology & IoT Outbreak Mapping",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "ejs": "^7.0.2",
+    "express": "^4.19.2",
+    "express-session": "^1.19.0"
+  }
+}

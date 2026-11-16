@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+package-lock.json
+npm-debug.log*
+
+# Secrets & Environment variables
+.env
+*.env
+.env.local
+.env.production
+
+# Vercel
+.vercel
+
+# Operating System
+.DS_Store
+Thumbs.db

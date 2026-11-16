@@ -1,0 +1,126 @@
+<%- include('../partials/header') %>
+
+<div class="auth-wrapper">
+    <div class="auth-card">
+        <div class="auth-top-header">
+            <div class="brand-icon">🔬</div>
+            <h1>DermaScan AI</h1>
+            <p>Smart Healthcare & Tele-Dermatology Platform</p>
+        </div>
+
+        <div class="auth-body">
+            <!-- Tabs: Sign In vs Register -->
+            <div class="auth-tabs">
+                <button type="button" class="auth-tab-btn active" id="tabSignInBtn" onclick="switchAuthTab('signin')">
+                    🔐 Sign In
+                </button>
+                <button type="button" class="auth-tab-btn" id="tabRegisterBtn" onclick="switchAuthTab('register')">
+                    📝 Patient Register
+                </button>
+            </div>
+
+            <!-- 1. SIGN IN FORM -->
+            <form id="signInForm" action="/auth/login" method="POST" style="display: flex; flex-direction: column; gap: 14px;">
+                <div class="form-group">
+                    <label class="form-label">Email Address</label>
+                    <input class="form-input" type="email" name="email" required placeholder="name@example.com" />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <input class="form-input" type="password" id="loginPasswordInput" name="password" required placeholder="••••••••" style="width: 100%; padding-right: 44px;" />
+                        <button type="button" onclick="togglePasswordVisibility('loginPasswordInput', this)" style="position: absolute; right: 8px; background: none; border: none; cursor: pointer; font-size: 1.15rem; color: #64748b; padding: 4px;" title="Toggle Password Visibility">
+                            👁️
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="padding: 12px; font-size: 0.92rem; font-weight: 800; justify-content: center;">
+                    Sign In to Portal ➔
+                </button>
+            </form>
+
+            <!-- 2. REGISTRATION FORM (Initially Hidden) -->
+            <form id="registerForm" action="/auth/register" method="POST" style="display: none; flex-direction: column; gap: 12px;">
+                <div class="form-group">
+                    <label class="form-label">Full Name</label>
+                    <input class="form-input" type="text" name="name" required placeholder="e.g. Rahul Sharma" />
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group">
+                        <label class="form-label">Age</label>
+                        <input class="form-input" type="number" name="age" value="24" required />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Gender</label>
+                        <select class="form-input" name="gender">
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Phone Contact</label>
+                    <input class="form-input" type="text" name="phone" required placeholder="+91 98765 43210" />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Email Address</label>
+                    <input class="form-input" type="email" name="email" required placeholder="patient@example.com" />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Create Password</label>
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <input class="form-input" type="password" id="regPasswordInput" name="password" required placeholder="••••••••" style="width: 100%; padding-right: 44px;" />
+                        <button type="button" onclick="togglePasswordVisibility('regPasswordInput', this)" style="position: absolute; right: 8px; background: none; border: none; cursor: pointer; font-size: 1.15rem; color: #64748b; padding: 4px;" title="Toggle Password Visibility">
+                            👁️
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="padding: 12px; font-size: 0.92rem; font-weight: 800; justify-content: center;">
+                    Create Patient Account ➔
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function togglePasswordVisibility(inputId, btn) {
+        const input = document.getElementById(inputId);
+        if (input.type === 'password') {
+            input.type = 'text';
+            btn.innerText = '🙈';
+        } else {
+            input.type = 'password';
+            btn.innerText = '👁️';
+        }
+    }
+
+    function switchAuthTab(tab) {
+        const signInForm = document.getElementById('signInForm');
+        const registerForm = document.getElementById('registerForm');
+        const tabSignInBtn = document.getElementById('tabSignInBtn');
+        const tabRegisterBtn = document.getElementById('tabRegisterBtn');
+
+        if (tab === 'signin') {
+            signInForm.style.display = 'flex';
+            registerForm.style.display = 'none';
+            tabSignInBtn.classList.add('active');
+            tabRegisterBtn.classList.remove('active');
+        } else {
+            signInForm.style.display = 'none';
+            registerForm.style.display = 'flex';
+            tabSignInBtn.classList.remove('active');
+            tabRegisterBtn.classList.add('active');
+        }
+    }
+</script>
+
+<%- include('../partials/footer') %>

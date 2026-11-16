@@ -1,0 +1,269 @@
+<%- include('../partials/header', { currentTab: 'doctor_queue' }) %>
+
+<main class="main-container">
+    <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <h1 class="page-title">Doctor Consultation Queue & Case Reviews</h1>
+            <p class="page-subtitle">Logged in as <%= user.name %> (<%= user.title || 'Specialist' %> • <%= user.hospital || 'Clinical Center' %>)</p>
+        </div>
+        <span class="badge badge-info" style="font-size: 0.85rem; padding: 6px 12px;">
+            Total Cases: <%= appointments.length %>
+        </span>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">Assigned Patient Queue</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Real-time synchronized with patient bookings</div>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Case / Patient</th>
+                        <th>Condition & AI Match</th>
+                        <th>Scanner GPS & Photo</th>
+                        <th>Consultation Slot</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% appointments.forEach(apt => { %>
+                        <tr>
+                            <td>
+                                <div style="font-weight: 800; color: var(--text-primary);"><%= apt.patient_name %></div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted);"><%= apt.patient_phone %> • <code><%= apt.id %></code></div>
+                            </td>
+                            <td>
+                                <span style="font-weight: 800; color: #ef4444;"><%= apt.disease %></span>
+                                <div style="font-size: 0.75rem; color: var(--text-muted);"><%= apt.confidence %>% AI Confidence</div>
+                            </td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="snapshot-thumb-wrap" 
+                                         onclick="openFullImageViewer('<%= apt.image_url %>', '<%= apt.id %>', '<%= apt.patient_name %>', '<%= apt.disease %>', '<%= apt.confidence %>', '📍 <%= apt.latitude.toFixed(5) %>, <%= apt.longitude.toFixed(5) %>', '<%= apt.created_at || apt.slot %>')" 
+                                         title="Click to view full photo" 
+                                         style="width: 48px; height: 48px; border-radius: 8px; overflow: hidden; background: #000; flex-shrink: 0; cursor: pointer; border: 2px solid var(--border); transition: transform 0.18s ease, border-color 0.18s ease; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                        <img src="<%= apt.image_url %>" alt="Thumbnail" style="width: 100%; height: 100%; object-fit: cover; display: block;" />
+                                    </div>
+                                    <div>
+                                        <button type="button" class="btn" 
+                                                onclick="openFullImageViewer('<%= apt.image_url %>', '<%= apt.id %>', '<%= apt.patient_name %>', '<%= apt.disease %>', '<%= apt.confidence %>', '📍 <%= apt.latitude.toFixed(5) %>, <%= apt.longitude.toFixed(5) %>', '<%= apt.created_at || apt.slot %>')" 
+                                                style="padding: 3px 8px; font-size: 0.7rem; font-weight: 700; background: #f8fafc; border-color: #cbd5e1; color: #1e293b; display: inline-flex; align-items: center; gap: 3px; cursor: pointer; margin-bottom: 2px;">
+                                            🔍 Open Fully
+                                        </button>
+                                        <div style="font-size: 0.72rem; color: var(--text-muted);">
+                                            📍 <%= apt.latitude.toFixed(4) %>, <%= apt.longitude.toFixed(4) %>
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div style="font-weight: 700; font-size: 0.82rem;"><%= apt.slot %></div>
+                            </td>
+                            <td>
+                                <span class="badge <%= apt.status === 'Confirmed' ? 'badge-success' : apt.status === 'Completed' ? 'badge-info' : 'badge-warning' %>">
+                                    <%= apt.status %>
+                                </span>
+                            </td>
+                            <td>
+                                <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.78rem;" 
+                                    data-id="<%= apt.id %>"
+                                    data-patient="<%= apt.patient_name %>"
+                                    data-phone="<%= apt.patient_phone %>"
+                                    data-disease="<%= apt.disease %>"
+                                    data-confidence="<%= apt.confidence %>"
+                                    data-slot="<%= apt.slot %>"
+                                    data-lat="<%= apt.latitude %>"
+                                    data-lng="<%= apt.longitude %>"
+                                    data-img="<%= apt.image_url %>"
+                                    data-status="<%= apt.status %>"
+                                    data-notes="<%= apt.doctor_notes || '' %>"
+                                    data-date="<%= apt.created_at || apt.slot %>"
+                                    onclick="openCaseReviewModalFromBtn(this)">
+                                    🔬 Inspect & Prescribe
+                                </button>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</main>
+
+<!-- DOCTOR CASE INSPECTION & PRESCRIPTION MODAL -->
+<div id="caseReviewModal" class="modal-overlay" style="display: none;" onclick="onCaseModalBackdrop(event)">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div style="font-weight: 800; font-size: 1.1rem;">Inspect Patient Clinical Record</div>
+            <button class="btn" style="padding: 2px 8px;" onclick="closeCaseReviewModal()">✕</button>
+        </div>
+        <form class="modal-body" action="/doctor/update-appointment" method="POST">
+            <input type="hidden" name="appointment_id" id="modalAptId" />
+
+            <!-- Actual Captured Lesion Photo with Open Fully Button -->
+            <div style="position: relative; width: 100%; height: 230px; border-radius: 10px; overflow: hidden; background: #000; cursor: pointer; border: 1px solid var(--border);" 
+                 onclick="triggerFullViewFromModal()" 
+                 title="Click to expand lesion photo">
+                <img id="modalCaseImg" src="" alt="Lesion Record" style="width: 100%; height: 100%; object-fit: contain;" />
+                <button type="button" class="btn" style="position: absolute; top: 10px; right: 10px; background: rgba(15,23,42,0.85); color: #fff; border: 1px solid rgba(255,255,255,0.4); font-size: 0.74rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; cursor: pointer;">
+                    🔍 Open Fully
+                </button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.82rem; background: #f8fafc; padding: 12px; border-radius: 8px;">
+                <div><b>Patient:</b> <span id="modalPatientName"></span></div>
+                <div><b>Phone:</b> <span id="modalPatientPhone"></span></div>
+                <div><b>AI Diagnosis:</b> <span id="modalDiseaseBadge" style="color: #ef4444; font-weight: 800;"></span> (<span id="modalConfidenceBadge"></span>%)</div>
+                <div><b>Consultation Slot:</b> <span id="modalSlot"></span></div>
+                <div style="grid-column: span 2;">
+                    <b>Scanner GPS Location:</b> <span id="modalGps"></span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Update Case Status</label>
+                <select class="form-input" name="status" id="modalStatusSelect">
+                    <option value="Confirmed">Confirmed</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Pending Review">Pending Review</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Doctor's Clinical Notes & Pre-Consultation Advice</label>
+                <textarea class="form-input" name="doctor_notes" id="modalNotesTextarea" rows="3" placeholder="e.g. Advised patient to avoid sun exposure and apply soothing cream..."></textarea>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                <button type="button" class="btn" onclick="closeCaseReviewModal()">Close</button>
+                <button type="submit" class="btn btn-primary">Save Notes & Status ➔</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- FULL-SCREEN CLINICAL SNAPSHOT LIGHTBOX MODAL -->
+<div id="fullImageViewerModal" class="modal-overlay" style="display: none; z-index: 9999;" onclick="onViewerBackdropClick(event)">
+    <div class="modal-content" style="max-width: 820px; width: 95%; max-height: 94vh; display: flex; flex-direction: column; overflow: hidden; background: #0f172a; color: #f8fafc; border: 1px solid #334155;">
+        <div class="modal-header" style="background: #1e293b; border-color: #334155; padding: 14px 20px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.2rem;">🔬</span>
+                <div>
+                    <div style="font-weight: 800; font-size: 1.05rem; color: #f8fafc;">Clinical Lesion Full-Resolution Snapshot</div>
+                    <div style="font-size: 0.78rem; color: #94a3b8;" id="viewerCaseSubtitle">Case Reference Record</div>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <a id="viewerDownloadBtn" href="" target="_blank" download="lesion-snapshot.jpg" class="btn" style="background: #334155; color: #f8fafc; border-color: #475569; font-size: 0.78rem; padding: 6px 12px; text-decoration: none;">
+                    ⤓ Open Original
+                </a>
+                <button type="button" class="btn" style="background: #334155; color: #f8fafc; border-color: #475569; padding: 6px 12px; font-size: 0.85rem;" onclick="closeFullImageViewer()">✕</button>
+            </div>
+        </div>
+
+        <div style="padding: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #020617; flex: 1; min-height: 380px; max-height: 65vh; overflow: hidden;">
+            <img id="viewerFullImg" src="" alt="Full Lesion Snapshot" style="max-height: 62vh; max-width: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.6);" />
+        </div>
+
+        <div style="background: #1e293b; border-top: 1px solid #334155; padding: 14px 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; font-size: 0.82rem;">
+            <div>
+                <span style="color: #94a3b8; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block;">Patient</span>
+                <b id="viewerPatientName" style="color: #38bdf8;">--</b>
+            </div>
+            <div>
+                <span style="color: #94a3b8; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block;">AI Diagnosis</span>
+                <span id="viewerDiagnosisBadge" style="font-weight: 800; color: #f87171;">--</span>
+            </div>
+            <div>
+                <span style="color: #94a3b8; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block;">Scanner GPS</span>
+                <span id="viewerGpsCoords" style="color: #cbd5e1;">--</span>
+            </div>
+            <div>
+                <span style="color: #94a3b8; font-size: 0.72rem; text-transform: uppercase; font-weight: 700; display: block;">Consultation Date</span>
+                <span id="viewerCapturedDate" style="color: #cbd5e1;">--</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.snapshot-thumb-wrap:hover {
+    transform: scale(1.06);
+    border-color: #38bdf8 !important;
+}
+</style>
+
+<script>
+    let currentModalCaseData = null;
+
+    function openFullImageViewer(imgUrl, caseId, patientInfo, disease, confidence, gps, date) {
+        if (!imgUrl) return;
+        document.getElementById('viewerFullImg').src = imgUrl;
+        document.getElementById('viewerDownloadBtn').href = imgUrl;
+        document.getElementById('viewerCaseSubtitle').innerText = `${caseId} • High-Resolution Skin Examination Frame`;
+        document.getElementById('viewerPatientName').innerText = patientInfo || '--';
+        document.getElementById('viewerDiagnosisBadge').innerText = `${disease || 'Lesion'} (${confidence || '--'}% Match)`;
+        document.getElementById('viewerGpsCoords').innerText = gps || '--';
+        document.getElementById('viewerCapturedDate').innerText = date || '--';
+        document.getElementById('fullImageViewerModal').style.display = 'flex';
+    }
+
+    function closeFullImageViewer() {
+        document.getElementById('fullImageViewerModal').style.display = 'none';
+        document.getElementById('viewerFullImg').src = '';
+    }
+
+    function onViewerBackdropClick(event) {
+        if (event.target && event.target.id === 'fullImageViewerModal') {
+            closeFullImageViewer();
+        }
+    }
+
+    function triggerFullViewFromModal() {
+        const img = document.getElementById('modalCaseImg').src;
+        const id = document.getElementById('modalAptId').value;
+        const patient = document.getElementById('modalPatientName').innerText;
+        const disease = document.getElementById('modalDiseaseBadge').innerText;
+        const conf = document.getElementById('modalConfidenceBadge').innerText;
+        const gps = document.getElementById('modalGps').innerText;
+        const slot = document.getElementById('modalSlot').innerText;
+        openFullImageViewer(img, id, patient, disease, conf, '📍 ' + gps, slot);
+    }
+
+    function openCaseReviewModalFromBtn(btn) {
+        document.getElementById('modalAptId').value = btn.dataset.id;
+        document.getElementById('modalPatientName').innerText = btn.dataset.patient;
+        document.getElementById('modalPatientPhone').innerText = btn.dataset.phone;
+        document.getElementById('modalDiseaseBadge').innerText = btn.dataset.disease;
+        document.getElementById('modalConfidenceBadge').innerText = btn.dataset.confidence;
+        document.getElementById('modalSlot').innerText = btn.dataset.slot;
+        document.getElementById('modalGps').innerText = parseFloat(btn.dataset.lat).toFixed(5) + ', ' + parseFloat(btn.dataset.lng).toFixed(5);
+        document.getElementById('modalCaseImg').src = btn.dataset.img;
+        document.getElementById('modalStatusSelect').value = btn.dataset.status;
+        document.getElementById('modalNotesTextarea').value = btn.dataset.notes;
+        document.getElementById('caseReviewModal').style.display = 'flex';
+    }
+
+    function closeCaseReviewModal() {
+        document.getElementById('caseReviewModal').style.display = 'none';
+    }
+
+    function onCaseModalBackdrop(event) {
+        if (event.target && event.target.id === 'caseReviewModal') {
+            closeCaseReviewModal();
+        }
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeFullImageViewer();
+            closeCaseReviewModal();
+        }
+    });
+</script>
+
+<%- include('../partials/footer') %>

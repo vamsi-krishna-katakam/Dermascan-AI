@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= typeof title !== 'undefined' ? title : 'DermaScan AI' %></title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- Application Stylesheet -->
+    <link rel="stylesheet" href="/css/style.css">
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+
+    <!-- 1. Header Navigation -->
+    <header>
+        <div class="brand">
+            <div class="brand-icon">🔬</div>
+            <div>
+                <a href="/" style="text-decoration: none; color: inherit;">
+                    <div class="brand-title">Dermascan AI</div>
+                    <div class="brand-subtitle">Clinical Tele-Dermatology & IoT Outbreak Platform (Node + Express + EJS)</div>
+                </a>
+            </div>
+        </div>
+
+        <div class="header-actions">
+            <!-- Live Scanner Availability Indicator -->
+            <div class="kiosk-status-pill" id="globalKioskPill">
+                <span class="pulse-dot <%= typeof kioskState !== 'undefined' && kioskState.status === 'Available' ? 'pulse-green' : 'pulse-yellow' %>"></span>
+                <span>Scanner: <b id="globalKioskStatusText"><%= typeof kioskState !== 'undefined' ? kioskState.status : 'Checking...' %></b></span>
+            </div>
+
+            <% if (typeof user !== 'undefined' && user) { %>
+                <!-- Current User Role Badge -->
+                <div class="role-badge role-<%= user.role %>">
+                    <span><%= user.role === 'patient' ? '👤 Patient' : user.role === 'doctor' ? '🩺 Doctor' : '🛡️ Admin' %>:</span>
+                    <b><%= user.name %></b>
+                </div>
+
+                <a href="/auth/logout" class="btn" style="background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-weight: 700; padding: 6px 12px; text-decoration: none;">
+                    🚪 Log Out
+                </a>
+            <% } else { %>
+                <a href="/auth/login" class="btn btn-primary" style="text-decoration: none; padding: 8px 16px;">
+                    🔐 Sign In / Register
+                </a>
+            <% } %>
+        </div>
+    </header>
+
+    <% if (typeof user !== 'undefined' && user) { %>
+        <!-- 2. Sub-Navigation Tabs based on Role -->
+        <nav class="nav-bar">
+            <% if (user.role === 'patient') { %>
+                <a href="/patient/scanner" class="nav-tab <%= typeof currentTab !== 'undefined' && currentTab === 'scanner' ? 'active' : '' %>" style="text-decoration: none;">
+                    📹 Live Skin Scanner & AI Care
+                </a>
+                <a href="/patient/appointments" class="nav-tab <%= typeof currentTab !== 'undefined' && currentTab === 'appointments' ? 'active' : '' %>" style="text-decoration: none;">
+                    📋 My Appointments
+                </a>
+            <% } else if (user.role === 'doctor') { %>
+                <a href="/doctor/dashboard" class="nav-tab <%= typeof currentTab !== 'undefined' && currentTab === 'doctor_queue' ? 'active' : '' %>" style="text-decoration: none;">
+                    🩺 Patient Consultation Queue & Case Reviews
+                </a>
+            <% } else if (user.role === 'admin') { %>
+                <a href="/admin/map" class="nav-tab <%= typeof currentTab !== 'undefined' && currentTab === 'map' ? 'active' : '' %>" style="text-decoration: none;">
+                    🗺️ Epidemiological GPS Outbreak Map
+                </a>
+                <a href="/admin/doctors" class="nav-tab <%= typeof currentTab !== 'undefined' && currentTab === 'doctors' ? 'active' : '' %>" style="text-decoration: none;">
+                    👨‍⚕️ Manage Doctors Directory
+                </a>
+                <a href="/admin/registry" class="nav-tab <%= typeof currentTab !== 'undefined' && currentTab === 'registry' ? 'active' : '' %>" style="text-decoration: none;">
+                    📊 Verified Case Registry
+                </a>
+            <% } %>
+        </nav>
+    <% } %>
+
+    <!-- Global Flash Notification Banner -->
+    <% if (typeof message !== 'undefined' && message) { %>
+        <div style="background: #dcfce7; border-bottom: 1px solid #86efac; color: #166534; padding: 10px 24px; font-weight: 700; font-size: 0.88rem; text-align: center;">
+            ✓ <%= message %>
+        </div>
+    <% } %>
+    <% if (typeof error !== 'undefined' && error) { %>
+        <div style="background: #fee2e2; border-bottom: 1px solid #fca5a5; color: #991b1b; padding: 10px 24px; font-weight: 700; font-size: 0.88rem; text-align: center;">
+            ⚠️ <%= error %>
+        </div>
+    <% } %>

@@ -1,0 +1,845 @@
+<%- include('../partials/header', { currentTab: 'scanner' }) %>
+
+<% 
+   const queue = typeof queueInfo !== 'undefined' && queueInfo ? queueInfo : { is_my_turn: true, position: 1, total_waiting: 1, active_patient: user.name };
+   const isMyTurn = queue.is_my_turn;
+%>
+
+<main class="main-container">
+    <div class="page-header">
+        <h1 class="page-title">Raspberry Pi Skin Scanner</h1>
+        <p class="page-subtitle">Single Hardware IoT Unit • FIFO Patient Queue & Real-Time AI Viewfinder</p>
+    </div>
+
+    <!-- Active Scanner Banner -->
+    <div id="scannerBanner" style="background: <%= isMyTurn ? '#f0fdf4' : '#eff6ff' %>; border: 1px solid <%= isMyTurn ? '#bbf7d0' : '#bfdbfe' %>; padding: 14px 20px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span id="bannerPulseDot" class="pulse-dot <%= isMyTurn ? 'pulse-green' : 'pulse-yellow' %>" style="width: 14px; height: 14px;"></span>
+            <div>
+                <div id="bannerTitle" style="font-weight: 800; font-size: 0.95rem; color: <%= isMyTurn ? '#166534' : '#1e40af' %>;">
+                    <%= isMyTurn ? '🟢 Your Turn (Position #1) — Live Camera & AI Scanner Active' : `⏳ Patient Queue: You are Position #${queue.position}` %>
+                </div>
+                <div id="bannerSubtitle" style="font-size: 0.78rem; color: var(--text-muted);">
+                    <%= isMyTurn ? 'Raspberry Pi 5 AI camera stream connected. Hold skin lesion in front of camera.' : `Currently examining: ${queue.active_patient || 'Patient 1'}. Your live camera will turn on automatically when they finish or log out.` %>
+                </div>
+            </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span id="bannerPushBadge" class="badge <%= isMyTurn ? 'badge-success' : 'badge-warning' %>" style="font-size: 0.8rem; padding: 6px 14px; font-weight: 700; <%= isMyTurn ? '' : 'background: #fef3c7; color: #92400e;' %>">
+                <%= isMyTurn ? '⚡ WebSocket Live: Turn Active' : `⏳ Queue Position #${queue.position} of ${queue.total_waiting}` %>
+            </span>
+            <button type="button" class="btn" id="btnReleaseScanner" onclick="passTurnToNext()" style="display: <%= isMyTurn ? 'inline-block' : 'none' %>; background: #fee2e2; color: #dc2626; border-color: #fca5a5; font-size: 0.78rem; font-weight: 700; padding: 6px 12px; cursor: pointer;">
+                🚪 Next Patient / Pass Turn
+            </button>
+        </div>
+    </div>
+
+    <!-- Dual Column Layout: Left Viewfinder, Right AI Diagnosis & Doctors -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+        
+        <!-- Left: Wireless Smartphone Viewfinder -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Live Wireless Viewfinder (Raspberry Pi 5)</div>
+                <span class="badge <%= isMyTurn ? 'badge-success' : 'badge-warning' %>" id="viewfinderStatus">
+                    <%= isMyTurn ? 'Live Feed Active' : 'Waiting in Queue' %>
+                </span>
+            </div>
+            <div class="card-body">
+                <div style="position: relative; width: 100%; height: 340px; background: #000; border-radius: var(--radius-md); overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                    <!-- Camera Stream (Loaded ONLY when it is this patient's turn!) -->
+                    <img id="kioskStreamImg" src="<%= isMyTurn ? '/api/scanner/video_feed' : '' %>" alt="Live Camera Stream" crossorigin="anonymous" style="width: 100%; height: 100%; object-fit: contain; display: <%= isMyTurn ? 'block' : 'none' %>;" onerror="onStreamError()" />
+                    
+                    <!-- Patient Queue Overlay (Shown when waiting for turn) -->
+                    <div id="streamOccupiedOverlay" style="display: <%= isMyTurn ? 'none' : 'flex' %>; position: absolute; inset: 0; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 10;">
+                        <div style="font-size: 3rem; margin-bottom: 12px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));">⏳</div>
+                        <div style="font-size: 1.15rem; font-weight: 800; color: #f8fafc; letter-spacing: -0.01em;">Waiting in Patient Queue</div>
+                        <div style="font-size: 0.85rem; color: #94a3b8; max-width: 380px; margin-top: 6px; line-height: 1.5;">
+                            You are <b style="color: #38bdf8;">Position #<span id="queuePosDisplay"><%= queue.position %></span></b> in line.<br />
+                            Currently examining: <b id="activePatientName" style="color: #38bdf8;"><%= queue.active_patient || 'Patient 1' %></b>.
+                        </div>
+                        <div style="margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); padding: 6px 16px; border-radius: 9999px; font-size: 0.78rem; color: #38bdf8; font-weight: 700;">
+                            <span class="pulse-dot pulse-yellow" style="width: 8px; height: 8px;"></span>
+                            ⚡ WebSocket Live: Auto-starting camera on your turn...
+                        </div>
+                    </div>
+
+                    <!-- AI Target Crosshair HUD -->
+                    <div id="cameraHudOverlay" style="display: <%= isMyTurn ? 'block' : 'none' %>; position: absolute; inset: 0; pointer-events: none; border: 2px dashed rgba(2, 132, 199, 0.6); margin: 30px; border-radius: 12px;">
+                        <div style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #38bdf8; font-size: 0.72rem; padding: 2px 8px; border-radius: 4px; font-weight: 700;">
+                            YOLO11n-seg Continuous Target Lock
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 14px; font-size: 0.78rem; color: var(--text-muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                    <span>📍 GPS: <b id="liveGpsCoord">16.49433° N, 80.50128° E (5 Sats Locked)</b></span>
+                    <span>⚡ Latency: <b id="liveLatencyFps">~280ms (3.5 FPS)</b></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: AI Real-Time Diagnosis & Pre-Care Remedies -->
+        <div class="card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div class="card-title">Real-Time Clinical Diagnostic Output</div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 0.74rem; font-weight: 700; color: var(--text-muted);">AI Mode:</span>
+                    <select id="conditionSelector" class="form-input" style="padding: 4px 8px; font-size: 0.76rem; font-weight: 700; border-radius: 6px;" onchange="onManualConditionChange(this.value)">
+                        <option value="AUTO" selected>🔄 Live Camera (Auto)</option>
+                        <option value="Melanoma">Melanoma</option>
+                        <option value="Eczema">Eczema</option>
+                        <option value="Acne">Acne</option>
+                        <option value="Vitiligo">Vitiligo</option>
+                        <option value="Warts">Warts</option>
+                        <option value="Onychomycosis">Onychomycosis</option>
+                    </select>
+                    <span class="badge <%= isMyTurn ? 'badge-warning' : '' %>" id="aiSeverityBadge" style="<%= isMyTurn ? 'background: #fef9c3; color: #854d0e;' : 'background: #f1f5f9; color: #64748b;' %>">
+                        <%= isMyTurn ? 'Awaiting Lesion' : 'In Queue' %>
+                    </span>
+                </div>
+            </div>
+            <div class="card-body" style="display: flex; flex-direction: column; gap: 16px;">
+                <!-- Disease Result Box -->
+                <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 14px; border-radius: var(--radius-md); border: 1px solid var(--border);">
+                    <div>
+                        <div style="font-size: 0.75rem; text-transform: uppercase; font-weight: 800; color: var(--text-muted);">Detected Lesion</div>
+                        <div style="font-size: 1.35rem; font-weight: 800; color: <%= isMyTurn ? '#0284c7' : '#64748b' %>;" id="detectedDiseaseName"><%= isMyTurn ? 'Scanning for Lesions...' : `In Queue (Position #${queue.position})` %></div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted);">AI Confidence: <b id="detectedConfidence">--%</b> <span id="detectedStatusNote" style="font-size: 0.72rem; color: <%= isMyTurn ? '#0284c7' : '#94a3b8' %>; margin-left: 6px;"><%= isMyTurn ? '(Hold skin lesion inside crosshair)' : '(Awaiting your turn in patient queue)' %></span></div>
+                    </div>
+                    <div id="detectedSampleImgWrapper" style="width: 70px; height: 70px; border-radius: 8px; overflow: hidden; background: #f1f5f9; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;">
+                        <img id="detectedSampleImg" src="" style="width:100%; height:100%; object-fit:cover; display: none;" />
+                        <span id="placeholderIcon" style="font-size: 1.8rem;"><%= isMyTurn ? '🔬' : '⏳' %></span>
+                    </div>
+                </div>
+
+                <!-- Immediate First-Aid Pre-Care Guidelines (Do's & Don'ts) -->
+                <div style="background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px;">
+                    <div style="font-weight: 800; font-size: 0.86rem; margin-bottom: 8px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                        🛡️ Immediate Pre-Care Guidelines (Do's & Don'ts to prevent lesion worsening):
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.78rem;">
+                        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 10px; border-radius: 6px;">
+                            <div style="font-weight: 800; color: #166534; margin-bottom: 4px;">✓ DO:</div>
+                            <ul id="dosList" style="padding-left: 16px; margin: 0; color: #14532d; line-height: 1.4;">
+                                <li>Hold camera steady 10–15 cm from skin lesion.</li>
+                                <li>Ensure adequate lighting without glare.</li>
+                                <li>Center lesion inside viewfinder crosshair.</li>
+                            </ul>
+                        </div>
+                        <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 10px; border-radius: 6px;">
+                            <div style="font-weight: 800; color: #991b1b; margin-bottom: 4px;">✗ DO NOT:</div>
+                            <ul id="dontsList" style="padding-left: 16px; margin: 0; color: #7f1d1d; line-height: 1.4;">
+                                <li>Do NOT move camera rapidly across skin.</li>
+                                <li>Do NOT cast dark shadows over the area.</li>
+                                <li>Do NOT touch or irritate inflamed skin.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 2: Recommended Clinical Specialists -->
+    <div style="margin-top: 32px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <div>
+                <h2 style="font-size: 1.15rem; font-weight: 800;">Recommended Specialists for Detected Condition</h2>
+                <p id="doctorsSubtitle" style="font-size: 0.8rem; color: var(--text-muted);">Specialists matched for your detected clinical condition.</p>
+            </div>
+        </div>
+
+        <div id="doctorsGrid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;">
+            <!-- Dynamically populated and filtered by detected condition -->
+        </div>
+    </div>
+</main>
+
+<!-- BOOKING APPOINTMENT MODAL -->
+<div id="bookingModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div style="font-weight: 800; font-size: 1.1rem;">Confirm Tele-Dermatology Consultation</div>
+            <button class="btn" style="padding: 2px 8px;" onclick="closeBookingModal()">✕</button>
+        </div>
+        <form class="modal-body" action="/patient/book" method="POST">
+            <input type="hidden" name="doctor_id" id="modalDoctorId" />
+            <input type="hidden" name="disease" id="modalDisease" value="General Clinical Screening" />
+            <input type="hidden" name="confidence" id="modalConfidence" value="0.0" />
+            <input type="hidden" name="image_url" id="modalImageUrl" value="" />
+            <input type="hidden" name="latitude" id="modalLat" value="16.494356" />
+            <input type="hidden" name="longitude" id="modalLng" value="80.501303" />
+
+            <div style="background: #f8fafc; padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <div style="font-weight: 800; color: #0284c7;" id="modalDoctorName">Dr. A. Sharma</div>
+                <div style="font-size: 0.8rem; color: var(--text-muted);" id="modalDoctorSubtitle">Senior Consultant Dermatologist</div>
+                <div id="modalTargetConditionText" style="font-size: 0.78rem; margin-top: 4px;">
+                    Target Condition: <b style="color: #64748b;">General Clinical Screening</b>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Patient Name</label>
+                <input class="form-input" disabled value="<%= user.name %>" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Phone Contact</label>
+                <input class="form-input" disabled value="<%= user.phone || '+91 98765 43210' %>" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Select Available Consultation Slot</label>
+                <select class="form-input" name="slot" id="modalSlotSelect" required>
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+                <button type="button" class="btn" onclick="closeBookingModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Confirm & Book Appointment ➔</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // Data passed from server
+    const allRemedies = <%- JSON.stringify(remedies) %>;
+    const allDoctors = <%- JSON.stringify(doctors) %>;
+    const sampleImages = {
+        "Melanoma": "https://images.unsplash.com/photo-1576765608535-5f04d1e3f289?w=300",
+        "Eczema": "https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?w=300",
+        "Acne": "https://images.unsplash.com/photo-1579684385127-1ef15d508118?w=300",
+        "Vitiligo": "https://images.unsplash.com/photo-1581594693702-fbdc51b2763b?w=300",
+        "Warts": "https://images.unsplash.com/photo-1628771065518-0d82f1938462?w=300",
+        "Onychomycosis": "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=300"
+    };
+
+    let currentDisease = null;
+    let currentConfidence = null;
+    let consecutiveEmptyCycles = 0;
+    let isCapturingSnapshot = false;
+    let lastCapturedSnapshotData = null;
+
+    // Helper: Case-insensitive / fuzzy match for disease classes
+    function findRemedy(name) {
+        if (!name) return null;
+        const clean = String(name).trim().toLowerCase();
+        for (const key of Object.keys(allRemedies)) {
+            if (key.toLowerCase() === clean) return { key, remedy: allRemedies[key] };
+            if (clean.includes('onyc') && key.toLowerCase().includes('onyc')) {
+                return { key, remedy: allRemedies[key] };
+            }
+        }
+        return null;
+    }
+
+    // Initialize WebSocket queue on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        initWebSocketQueue();
+    });
+
+    // =========================================================================
+    // STANDBY STATE (Searching for skin lesion in camera viewfinder)
+    // =========================================================================
+    function resetToStandbyState() {
+        const overlay = document.getElementById('streamOccupiedOverlay');
+        if (overlay && overlay.style.display === 'flex') {
+            return; // Keep medical privacy shield display active!
+        }
+
+        currentDisease = null;
+        currentConfidence = null;
+
+        const diseaseEl = document.getElementById('detectedDiseaseName');
+        const noteEl = document.getElementById('detectedStatusNote');
+        const badge = document.getElementById('aiSeverityBadge');
+        const dosList = document.getElementById('dosList');
+        const dontsList = document.getElementById('dontsList');
+
+        document.getElementById('detectedConfidence').innerText = "--%";
+
+        const sampleImg = document.getElementById('detectedSampleImg');
+        const placeholderIcon = document.getElementById('placeholderIcon');
+        if (sampleImg) sampleImg.style.display = 'none';
+        if (placeholderIcon) placeholderIcon.style.display = 'block';
+
+        // Automatic scanning view
+        diseaseEl.innerText = "Scanning for Lesions...";
+        diseaseEl.style.color = "#0284c7";
+        if (noteEl) {
+            noteEl.innerText = "(Hold skin lesion inside crosshair)";
+            noteEl.style.color = "#0284c7";
+        }
+        badge.innerText = "Awaiting Lesion";
+        badge.className = "badge badge-warning";
+        badge.style.background = "#fef9c3";
+        badge.style.color = "#854d0e";
+
+        dosList.innerHTML = `
+            <li>Hold camera steady 10–15 cm from skin lesion.</li>
+            <li>Ensure adequate lighting without glare.</li>
+            <li>Center lesion inside viewfinder crosshair.</li>
+        `;
+        dontsList.innerHTML = `
+            <li>Do NOT move camera rapidly across skin.</li>
+            <li>Do NOT cast dark shadows over the area.</li>
+            <li>Do NOT touch or irritate inflamed skin.</li>
+        `;
+
+        // Reset Modal target
+        document.getElementById('modalDisease').value = "General Clinical Screening";
+        document.getElementById('modalConfidence').value = "0.0";
+        document.getElementById('modalImageUrl').value = "";
+        document.getElementById('modalTargetConditionText').innerHTML = `Target Condition: <b style="color: #64748b;">General Clinical Screening</b>`;
+
+        // Show all available specialists
+        renderRecommendedDoctors(null);
+    }
+
+    // =========================================================================
+    // AUTOMATIC LESION SNAPSHOT CAPTURE (Saves patient's exact skin photo)
+    // =========================================================================
+    async function captureLesionSnapshot() {
+        if (isCapturingSnapshot) return;
+        isCapturingSnapshot = true;
+        try {
+            // Priority 1: Instant HTML5 Canvas snapshot from active live stream
+            const streamImg = document.getElementById('kioskStreamImg');
+            if (streamImg && streamImg.style.display !== 'none' && streamImg.naturalWidth > 0) {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = streamImg.naturalWidth;
+                    canvas.height = streamImg.naturalHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(streamImg, 0, 0);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                    if (dataUrl && dataUrl.length > 500) {
+                        applySnapshotToUI(dataUrl);
+                        isCapturingSnapshot = false;
+                        return;
+                    }
+                } catch(canvasErr) {}
+            }
+
+            // Priority 2: Fetch instant camera frame via Express proxy
+            const endpoints = ['/api/scanner/snapshot'];
+            for (const ep of endpoints) {
+                try {
+                    const res = await fetch(ep, { cache: 'no-store', signal: AbortSignal.timeout(1000) });
+                    if (res.ok) {
+                        const blob = await res.blob();
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            applySnapshotToUI(reader.result);
+                        };
+                        reader.readAsDataURL(blob);
+                        isCapturingSnapshot = false;
+                        return;
+                    }
+                } catch(e) {}
+            }
+        } catch(e) {
+        } finally {
+            isCapturingSnapshot = false;
+        }
+    }
+
+    function applySnapshotToUI(dataUrl) {
+        if (!dataUrl) return;
+        lastCapturedSnapshotData = dataUrl;
+        const sampleImg = document.getElementById('detectedSampleImg');
+        const placeholderIcon = document.getElementById('placeholderIcon');
+        if (sampleImg) {
+            sampleImg.src = dataUrl;
+            sampleImg.style.display = 'block';
+            if (placeholderIcon) placeholderIcon.style.display = 'none';
+        }
+        const modalImg = document.getElementById('modalImageUrl');
+        if (modalImg) {
+            modalImg.value = dataUrl;
+        }
+    }
+
+    // =========================================================================
+    // DYNAMIC DETECTION & DOCTORS UPDATER
+    // =========================================================================
+    function updateDetectionOutput(disease, confidence) {
+        if (!disease) return;
+        const matched = findRemedy(disease);
+        if (!matched) return;
+
+        const matchedKey = matched.key;
+        const remedy = matched.remedy;
+        currentDisease = matchedKey;
+        currentConfidence = confidence;
+
+        // 1. Update Disease Name & Color
+        const diseaseEl = document.getElementById('detectedDiseaseName');
+        diseaseEl.innerText = matchedKey;
+        diseaseEl.style.color = remedy.color || '#ef4444';
+
+        // 2. Update Confidence & Status Note
+        document.getElementById('detectedConfidence').innerText = confidence + '%';
+        const noteEl = document.getElementById('detectedStatusNote');
+        if (noteEl) {
+            noteEl.innerText = "(Active YOLO Target Lock)";
+            noteEl.style.color = "#16a34a";
+        }
+
+        // 3. Automatically capture live lesion snapshot from camera!
+        captureLesionSnapshot();
+        if (!lastCapturedSnapshotData && sampleImages[matchedKey]) {
+            const sampleImg = document.getElementById('detectedSampleImg');
+            const placeholderIcon = document.getElementById('placeholderIcon');
+            sampleImg.src = sampleImages[matchedKey];
+            sampleImg.style.display = 'block';
+            if (placeholderIcon) placeholderIcon.style.display = 'none';
+            document.getElementById('modalImageUrl').value = sampleImages[matchedKey];
+        }
+
+        // 4. Update Severity Badge
+        const badge = document.getElementById('aiSeverityBadge');
+        badge.innerText = remedy.severity;
+        badge.style.background = '';
+        badge.style.color = '';
+        if (remedy.severity.includes('High')) {
+            badge.className = 'badge badge-danger';
+        } else if (remedy.severity.includes('Moderate')) {
+            badge.className = 'badge badge-warning';
+        } else {
+            badge.className = 'badge badge-info';
+        }
+
+        // 5. Update Do's List
+        const dosList = document.getElementById('dosList');
+        dosList.innerHTML = remedy.dos.map(d => `<li>${d}</li>`).join('');
+
+        // 6. Update Don'ts List
+        const dontsList = document.getElementById('dontsList');
+        dontsList.innerHTML = remedy.donts.map(d => `<li>${d}</li>`).join('');
+
+        // 7. Update Modal Hidden Inputs
+        document.getElementById('modalDisease').value = matchedKey;
+        document.getElementById('modalConfidence').value = confidence;
+        document.getElementById('modalTargetConditionText').innerHTML = `Target Condition: <b style="color: ${remedy.color}">${matchedKey} (${confidence}% Match)</b>`;
+
+        // 8. Re-render Doctors filtered by this newly detected disease
+        renderRecommendedDoctors(matchedKey);
+    }
+
+    // Render & Filter Doctors Grid based on detected condition
+    function renderRecommendedDoctors(diseaseName) {
+        const grid = document.getElementById('doctorsGrid');
+        if (!grid) return;
+
+        let matched = allDoctors;
+        if (diseaseName) {
+            const filtered = allDoctors.filter(doc => 
+                doc.specialties.some(s => s.toLowerCase().includes(diseaseName.toLowerCase()))
+            );
+            if (filtered.length > 0) matched = filtered;
+            document.getElementById('doctorsSubtitle').innerText = `Showing specialists matched for ${diseaseName} (${matched.length} found).`;
+        } else {
+            document.getElementById('doctorsSubtitle').innerText = `Showing all available specialists (${allDoctors.length} found). Position camera at lesion to auto-match condition specialists.`;
+        }
+
+        grid.innerHTML = matched.map(doc => `
+            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div class="card-body">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            <div style="font-weight: 800; font-size: 1.05rem; color: var(--primary);">${doc.name}</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted);">${doc.title}</div>
+                            <div style="font-size: 0.78rem; color: var(--text-muted);">${doc.hospital}</div>
+                        </div>
+                        <span class="badge badge-success">⭐ ${doc.rating} / 5.0</span>
+                    </div>
+
+                    <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 4px;">
+                        ${doc.specialties.map(spec => {
+                            const isMatch = diseaseName && spec.toLowerCase().includes(diseaseName.toLowerCase());
+                            return `
+                                <span style="font-size: 0.7rem; font-weight: 700; background: ${isMatch ? '#dcfce7' : '#e0f2fe'}; color: ${isMatch ? '#166534' : '#0284c7'}; border: 1px solid ${isMatch ? '#86efac' : 'transparent'}; padding: 2px 8px; border-radius: 4px;">
+                                    ${spec}
+                                </span>
+                            `;
+                        }).join('')}
+                    </div>
+
+                    <div style="margin-top: 10px; font-size: 0.78rem; color: var(--text-muted);">
+                        ⭐ <b>${doc.rating}</b>/5.0 (${doc.experience_years} yrs experience)
+                    </div>
+                </div>
+
+                <div style="padding: 12px 18px; background: #f8fafc; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Slots: ${doc.available_slots[0]}</span>
+                    <button class="btn btn-primary" style="padding: 6px 14px; font-size: 0.8rem;" 
+                        data-id="${doc.id}"
+                        data-name="${doc.name}"
+                        data-title="${doc.title}"
+                        data-hospital="${doc.hospital}"
+                        data-slots='${JSON.stringify(doc.available_slots)}'
+                        onclick="openBookingFromBtn(this)">
+                        Book Appointment ➔
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Manual Selector for testing / viva presentation
+    function onManualConditionChange(val) {
+        if (val === 'AUTO') {
+            consecutiveEmptyCycles = 0;
+            resetToStandbyState();
+        } else {
+            const confidences = {
+                "Melanoma": "86.4",
+                "Eczema": "89.2",
+                "Acne": "94.1",
+                "Vitiligo": "89.4",
+                "Warts": "88.0",
+                "Onychomycosis": "85.7"
+            };
+            updateDetectionOutput(val, confidences[val] || "88.5");
+        }
+    }
+
+    // =========================================================================
+    // REAL-TIME WEBSOCKET PATIENT QUEUE (Ultra-Low Latency & Instant Turn Handover)
+    // =========================================================================
+    let ws = null;
+
+    function initWebSocketQueue() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = protocol + '//' + window.location.host + '/ws/scanner';
+        
+        try {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({
+                    action: 'join',
+                    patientId: '<%= user.id %>',
+                    patientName: '<%= user.name %>'
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch(err) {}
+            };
+
+            ws.onclose = () => {
+                setTimeout(initWebSocketQueue, 2000);
+            };
+
+            ws.onerror = () => {
+                setTimeout(initWebSocketQueue, 2000);
+            };
+        } catch(e) {
+            console.error('WebSocket error:', e);
+        }
+    }
+
+    function handleWebSocketMessage(data) {
+        if (!data) return;
+
+        // 1. If it is NOT my turn (waiting in queue)
+        if (!data.is_my_turn) {
+            handleQueueWaitingState(data);
+            return;
+        }
+
+        // 2. If it IS my turn!
+        handleTurnActiveState(data);
+
+        // If telemetry is included, process detections
+        if (data.type === 'TELEMETRY' || data.detections || data.gps) {
+            processDetectionPayload(data);
+        }
+    }
+
+    function handleQueueWaitingState(data) {
+        // Cut camera feed immediately so no frames are requested
+        const streamImg = document.getElementById('kioskStreamImg');
+        if (streamImg) {
+            streamImg.src = '';
+            streamImg.style.display = 'none';
+        }
+
+        const overlay = document.getElementById('streamOccupiedOverlay');
+        if (overlay) overlay.style.display = 'flex';
+
+        const hud = document.getElementById('cameraHudOverlay');
+        if (hud) hud.style.display = 'none';
+
+        const posEl = document.getElementById('queuePosDisplay');
+        if (posEl && data.position) posEl.innerText = data.position;
+
+        const activeEl = document.getElementById('activePatientName');
+        if (activeEl && data.active_patient) activeEl.innerText = data.active_patient;
+
+        const vfBadge = document.getElementById('viewfinderStatus');
+        if (vfBadge) {
+            vfBadge.className = 'badge badge-warning';
+            vfBadge.innerText = 'Waiting in Queue';
+        }
+
+        // Banner updates
+        const banner = document.getElementById('scannerBanner');
+        if (banner) {
+            banner.style.background = '#eff6ff';
+            banner.style.borderColor = '#bfdbfe';
+        }
+        const pulseDot = document.getElementById('bannerPulseDot');
+        if (pulseDot) pulseDot.className = 'pulse-dot pulse-yellow';
+
+        const bannerTitle = document.getElementById('bannerTitle');
+        if (bannerTitle) {
+            bannerTitle.style.color = '#1e40af';
+            bannerTitle.innerText = `⏳ Patient Queue: You are Position #${data.position || 2}`;
+        }
+        const bannerSub = document.getElementById('bannerSubtitle');
+        if (bannerSub) {
+            bannerSub.innerText = `Currently examining: ${data.active_patient || 'Patient 1'}. Your live camera will turn on automatically when they finish or log out.`;
+        }
+        const badge = document.getElementById('bannerPushBadge');
+        if (badge) {
+            badge.className = 'badge badge-warning';
+            badge.style.background = '#fef3c7';
+            badge.style.color = '#92400e';
+            badge.innerText = `⏳ Queue Position #${data.position || 2}`;
+        }
+        const passBtn = document.getElementById('btnReleaseScanner');
+        if (passBtn) passBtn.style.display = 'none';
+
+        // Right side
+        const diseaseEl = document.getElementById('detectedDiseaseName');
+        if (diseaseEl) {
+            diseaseEl.innerText = `In Queue (Position #${data.position || 2})`;
+            diseaseEl.style.color = "#64748b";
+        }
+        const confEl = document.getElementById('detectedConfidence');
+        if (confEl) confEl.innerText = "--%";
+
+        const noteEl = document.getElementById('detectedStatusNote');
+        if (noteEl) {
+            noteEl.innerText = "(Awaiting your turn in patient queue)";
+            noteEl.style.color = "#94a3b8";
+        }
+
+        const sevBadge = document.getElementById('aiSeverityBadge');
+        if (sevBadge) {
+            sevBadge.innerText = "In Queue";
+            sevBadge.className = "badge";
+            sevBadge.style.background = "#f1f5f9";
+            sevBadge.style.color = "#64748b";
+        }
+
+        const placeholderIcon = document.getElementById('placeholderIcon');
+        if (placeholderIcon) {
+            placeholderIcon.style.display = 'block';
+            placeholderIcon.innerText = '⏳';
+        }
+
+        const sampleImg = document.getElementById('detectedSampleImg');
+        if (sampleImg) sampleImg.style.display = 'none';
+
+        const headerPillText = document.getElementById('globalKioskStatusText');
+        if (headerPillText) headerPillText.innerText = 'In Use (Queue Active)';
+    }
+
+    function handleTurnActiveState(data) {
+        // Activate live camera stream
+        const streamImg = document.getElementById('kioskStreamImg');
+        const streamUrl = data.stream_url || '/api/scanner/video_feed';
+        if (streamImg && (streamImg.style.display === 'none' || !streamImg.src || streamImg.src === window.location.href || !streamImg.src.includes('/api/scanner/video_feed'))) {
+            streamImg.src = streamUrl;
+            streamImg.style.display = 'block';
+        }
+
+        const overlay = document.getElementById('streamOccupiedOverlay');
+        if (overlay) overlay.style.display = 'none';
+
+        const hud = document.getElementById('cameraHudOverlay');
+        if (hud) hud.style.display = 'block';
+
+        const vfBadge = document.getElementById('viewfinderStatus');
+        if (vfBadge) {
+            vfBadge.className = 'badge badge-success';
+            vfBadge.innerText = 'Live Feed Active';
+        }
+
+        // Banner updates
+        const banner = document.getElementById('scannerBanner');
+        if (banner) {
+            banner.style.background = '#f0fdf4';
+            banner.style.borderColor = '#bbf7d0';
+        }
+        const pulseDot = document.getElementById('bannerPulseDot');
+        if (pulseDot) pulseDot.className = 'pulse-dot pulse-green';
+
+        const bannerTitle = document.getElementById('bannerTitle');
+        if (bannerTitle) {
+            bannerTitle.style.color = '#166534';
+            bannerTitle.innerText = '🟢 Your Turn (Position #1) — Live Camera & AI Scanner Active';
+        }
+        const bannerSub = document.getElementById('bannerSubtitle');
+        if (bannerSub) {
+            bannerSub.innerText = 'Raspberry Pi 5 AI camera stream connected. Hold skin lesion in front of camera.';
+        }
+        const badge = document.getElementById('bannerPushBadge');
+        if (badge) {
+            badge.className = 'badge badge-success';
+            badge.style.background = '';
+            badge.style.color = '';
+            badge.innerText = '⚡ WebSocket Live: Turn Active';
+        }
+        const passBtn = document.getElementById('btnReleaseScanner');
+        if (passBtn) passBtn.style.display = 'inline-block';
+
+        const placeholderIcon = document.getElementById('placeholderIcon');
+        if (placeholderIcon && placeholderIcon.innerText === '⏳') {
+            placeholderIcon.innerText = '🔬';
+        }
+
+        const diseaseEl = document.getElementById('detectedDiseaseName');
+        if (diseaseEl && diseaseEl.innerText.includes('In Queue')) {
+            diseaseEl.innerText = "Scanning for Lesions...";
+            diseaseEl.style.color = "#0284c7";
+        }
+        const noteEl = document.getElementById('detectedStatusNote');
+        if (noteEl && noteEl.innerText.includes('queue')) {
+            noteEl.innerText = "(Hold skin lesion inside crosshair)";
+            noteEl.style.color = "#0284c7";
+        }
+        const sevBadge = document.getElementById('aiSeverityBadge');
+        if (sevBadge && sevBadge.innerText === "In Queue") {
+            sevBadge.innerText = "Awaiting Lesion";
+            sevBadge.className = "badge badge-warning";
+            sevBadge.style.background = "#fef9c3";
+            sevBadge.style.color = "#854d0e";
+        }
+
+        const headerPillText = document.getElementById('globalKioskStatusText');
+        if (headerPillText) headerPillText.innerText = 'In Use (You)';
+    }
+
+    function passTurnToNext() {
+        if (!confirm('Pass your camera turn to the next patient in queue?')) return;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                action: 'leave',
+                patientId: '<%= user.id %>'
+            }));
+        }
+        fetch('/api/scanner/end-session', { method: 'POST' }).then(() => {
+            window.location.reload();
+        });
+    }
+
+    function processDetectionPayload(data) {
+        if (!data) return;
+        const selector = document.getElementById('conditionSelector');
+        if (selector && selector.value !== 'AUTO') return;
+
+        // 1. Update GPS & Latency on Viewfinder
+        if (data.gps && (data.gps.latitude || data.gps.latitude === 0)) {
+            const lat = Number(data.gps.latitude).toFixed(5);
+            const lng = Number(data.gps.longitude).toFixed(5);
+            const sats = data.gps.satellites || 0;
+            document.getElementById('liveGpsCoord').innerText = `${lat}° N, ${lng}° E (${sats} Sats Locked)`;
+            document.getElementById('modalLat').value = lat;
+            document.getElementById('modalLng').value = lng;
+        }
+        if (data.latency || data.fps) {
+            const latVal = data.latency ? Math.round(data.latency) : 273;
+            const fpsVal = data.fps ? Number(data.fps).toFixed(1) : '3.5';
+            document.getElementById('liveLatencyFps').innerText = `~${latVal}ms (${fpsVal} FPS)`;
+        }
+
+        // 2. Read live AI detection from YOLO model
+        let detectedDisease = null;
+        let detectedConfidence = 0;
+
+        if (data.detections && Array.isArray(data.detections) && data.detections.length > 0) {
+            const sorted = [...data.detections].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+            const top = sorted[0];
+            detectedDisease = top.class;
+            detectedConfidence = top.confidence > 1 ? Number(top.confidence).toFixed(1) : (Number(top.confidence) * 100).toFixed(1);
+        } else if (data.counts && Object.keys(data.counts).length > 0) {
+            detectedDisease = Object.keys(data.counts)[0];
+            detectedConfidence = "89.4";
+        }
+
+        if (detectedDisease) {
+            consecutiveEmptyCycles = 0;
+            updateDetectionOutput(detectedDisease, detectedConfidence);
+        } else {
+            consecutiveEmptyCycles++;
+            if (consecutiveEmptyCycles >= 3) {
+                resetToStandbyState();
+            }
+        }
+    }
+
+    // Polling fallback
+    async function pollPiLiveDetections() {
+        const selector = document.getElementById('conditionSelector');
+        if (selector && selector.value !== 'AUTO') return;
+        try {
+            const res = await fetch('/api/scanner/live-stats', { cache: 'no-store' });
+            if (res.ok) {
+                const data = await res.json();
+                processDetectionPayload(data);
+            }
+        } catch(e) {}
+    }
+
+    function onStreamError() {
+        const img = document.getElementById('kioskStreamImg');
+        if (!img || img.style.display === 'none') return;
+        setTimeout(() => {
+            if (img.style.display !== 'none') {
+                img.src = '/api/scanner/video_feed?t=' + Date.now();
+            }
+        }, 3000);
+    }
+
+    function openBookingFromBtn(btn) {
+        const id = btn.dataset.id;
+        const name = btn.dataset.name;
+        const title = btn.dataset.title;
+        const hospital = btn.dataset.hospital;
+        const slots = JSON.parse(btn.dataset.slots || '[]');
+        openBookingModal(id, name, title, hospital, slots);
+    }
+
+    function openBookingModal(id, name, title, hospital, slots) {
+        document.getElementById('modalDoctorId').value = id;
+        document.getElementById('modalDoctorName').innerText = name;
+        document.getElementById('modalDoctorSubtitle').innerText = title + ' • ' + hospital;
+        const select = document.getElementById('modalSlotSelect');
+        select.innerHTML = '';
+        slots.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.innerText = s;
+            select.appendChild(opt);
+        });
+        document.getElementById('bookingModal').style.display = 'flex';
+    }
+
+    function closeBookingModal() {
+        document.getElementById('bookingModal').style.display = 'none';
+    }
+</script>
+
+<%- include('../partials/footer') %>

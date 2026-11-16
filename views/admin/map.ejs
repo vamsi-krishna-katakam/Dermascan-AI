@@ -1,0 +1,112 @@
+<%- include('../partials/header', { currentTab: 'map' }) %>
+
+<main class="main-container">
+    <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <h1 class="page-title">Epidemiological GPS Outbreak Map</h1>
+            <p class="page-subtitle">Real-time geospatial visualization of skin lesion detections captured across Raspberry Pi Scanners.</p>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 0.8rem; font-weight: 700;">Filter Disease:</label>
+            <select id="mapFilterSelect" class="form-input" style="padding: 6px 12px; font-size: 0.8rem;" onchange="filterMapPins()">
+                <option value="All">All Diagnosed Lesions</option>
+                <option value="Melanoma">Melanoma</option>
+                <option value="Eczema">Eczema</option>
+                <option value="Acne">Acne</option>
+                <option value="Vitiligo">Vitiligo</option>
+                <option value="Warts">Warts</option>
+                <option value="Onychomycosis">Onychomycosis</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="card" style="padding: 0; overflow: hidden;">
+        <!-- Leaflet Map Container -->
+        <div id="leafletMap" style="width: 100%; height: 560px; z-index: 10;"></div>
+    </div>
+</main>
+
+<script>
+    const casesData = <%- JSON.stringify(cases) %>;
+    let map = null;
+    let markersGroup = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // Initialize Leaflet Map centered on VIT-AP Kiosk area
+        map = L.map('leafletMap').setView([16.494356, 80.501303], 15);
+
+        // Standard OpenStreetMap Tiles (No API key needed!)
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        markersGroup = L.featureGroup().addTo(map);
+        renderPins('All');
+    });
+
+    function renderPins(selectedDisease) {
+        if (!markersGroup) return;
+        markersGroup.clearLayers();
+        const bounds = [];
+
+        casesData.forEach(c => {
+            if (selectedDisease !== 'All' && c.disease !== selectedDisease) return;
+
+            // Custom Leaflet Teardrop Pin Marker
+            const pinColor = c.color || '#ef4444';
+            const customIcon = L.divIcon({
+                className: 'custom-map-pin',
+                html: `<div style="background-color: ${pinColor}; width: 28px; height: 28px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center;">
+                         <div style="width: 8px; height: 8px; background: white; border-radius: 50%; transform: rotate(45deg);"></div>
+                       </div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 28],
+                popupAnchor: [0, -28]
+            });
+
+            const marker = L.marker([c.latitude, c.longitude], { icon: customIcon });
+
+            // RICH POPUP WITH ACTUAL LESION IMAGE!
+            marker.bindPopup(`
+                <div style="font-family: system-ui, sans-serif; width: 220px; padding: 4px;">
+                    <div style="width: 100%; height: 110px; border-radius: 6px; overflow: hidden; margin-bottom: 8px; background: #000;">
+                        <img src="${c.image_url}" alt="Lesion Snapshot" style="width: 100%; height: 100%; object-fit: cover;" />
+                    </div>
+                    <div style="font-weight: 800; font-size: 0.95rem; color: #0f172a; margin-bottom: 2px;">
+                        ${c.disease}
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.76rem; color: #64748b; margin-bottom: 6px;">
+                        <span>AI Match: <b style="color:${pinColor}; font-weight:800;">${c.confidence}%</b></span>
+                        <span>${c.patient_name}</span>
+                    </div>
+                    <div style="font-size: 0.72rem; color: #475569; margin-bottom: 4px;">
+                        📍 <b>GPS:</b> ${c.latitude.toFixed(5)}, ${c.longitude.toFixed(5)}
+                    </div>
+                    <div style="font-size: 0.68rem; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 4px;">
+                        🕒 Captured: ${c.created_at || 'Recent'}
+                    </div>
+                </div>
+            `);
+
+            markersGroup.addLayer(marker);
+            bounds.push([c.latitude, c.longitude]);
+        });
+
+        if (bounds.length > 0 && map) {
+            setTimeout(() => {
+                map.invalidateSize();
+                if (bounds.length === 1) map.setView(bounds[0], 16);
+                else map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+            }, 200);
+        }
+    }
+
+    function filterMapPins() {
+        const sel = document.getElementById('mapFilterSelect').value;
+        renderPins(sel);
+    }
+</script>
+
+<%- include('../partials/footer') %>
