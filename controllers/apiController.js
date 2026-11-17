@@ -36,15 +36,7 @@ exports.getVideoStreamProxy = (req, res) => {
     return res.status(403).send('HTTP 403 Forbidden: Hardware camera ownership conflict.');
   }
 
-  // Authorized! Stream MJPEG from Raspberry Pi hardware (or custom RPI_STREAM_URL tunnel)
-  res.writeHead(200, {
-    'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
-    'Cache-Control': 'no-cache, no-store, must-revalidate, pre-check=0, post-check=0, max-age=0',
-    'Pragma': 'no-cache',
-    'Expires': '0',
-    'Connection': 'close'
-  });
-
+  // Authorized! Stream MJPEG from Raspberry Pi hardware
   // Multi-tier resolution:
   // 1. Explicit query parameter ?pi_url=
   // 2. Environment variable RPI_STREAM_URL
@@ -88,7 +80,7 @@ exports.getVideoStreamProxy = (req, res) => {
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
         path: parsed.pathname + (parsed.search || ''),
         method: 'GET',
-        timeout: 2500
+        timeout: 1200
       };
     } catch (err) {
       return tryNextEndpoint(index + 1);
@@ -97,6 +89,15 @@ exports.getVideoStreamProxy = (req, res) => {
     const piReq = client.request(reqOpts, (piRes) => {
       if (piRes.statusCode >= 200 && piRes.statusCode < 300) {
         streamConnected = true;
+        if (!res.headersSent) {
+          res.writeHead(200, {
+            'Content-Type': piRes.headers['content-type'] || 'multipart/x-mixed-replace; boundary=frame',
+            'Cache-Control': 'no-cache, no-store, must-revalidate, pre-check=0, post-check=0, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Connection': 'close'
+          });
+        }
         piRes.pipe(res);
         piRes.on('error', () => {
           try { res.end(); } catch (e) {}
