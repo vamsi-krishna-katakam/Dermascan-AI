@@ -47,45 +47,11 @@
                 </span>
             </div>
             <div class="card-body">
-                <div id="viewfinderContainer" style="position: relative; width: 100%; height: 340px; background: radial-gradient(circle at center, #1e293b 0%, #090d16 100%); border-radius: var(--radius-md); overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                <div style="position: relative; width: 100%; height: 340px; background: #000; border-radius: var(--radius-md); overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                    <!-- Camera Stream from Raspberry Pi 5 (Direct Live MJPEG Feed) -->
+                    <img id="kioskStreamImg" src="<%= isMyTurn ? '/api/scanner/video_feed' : '' %>" alt="Live Raspberry Pi Camera Stream" crossorigin="anonymous" style="width: 100%; height: 100%; object-fit: contain; display: <%= isMyTurn ? 'block' : 'none' %>;" onerror="onStreamError()" />
                     
-                    <!-- 1. Background Clinical AI Scanner / Radar HUD (Always active, NEVER blank or black!) -->
-                    <div id="scannerRadarOverlay" style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; z-index: 1;">
-                        <!-- Animated Scanning Grid lines -->
-                        <div style="position: absolute; inset: 0; background-image: linear-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(56, 189, 248, 0.08) 1px, transparent 1px); background-size: 28px 28px;"></div>
-                        
-                        <!-- High-tech Pulsing Crosshair Reticle -->
-                        <div id="viewfinderReticle" style="width: 170px; height: 170px; border: 2px dashed rgba(56, 189, 248, 0.65); border-radius: 16px; display: flex; align-items: center; justify-content: center; position: relative; transition: all 0.3s ease;">
-                            <div style="position: absolute; width: 22px; height: 22px; border-top: 3px solid #38bdf8; border-left: 3px solid #38bdf8; top: -3px; left: -3px;"></div>
-                            <div style="position: absolute; width: 22px; height: 22px; border-top: 3px solid #38bdf8; border-right: 3px solid #38bdf8; top: -3px; right: -3px;"></div>
-                            <div style="position: absolute; width: 22px; height: 22px; border-bottom: 3px solid #38bdf8; border-left: 3px solid #38bdf8; bottom: -3px; left: -3px;"></div>
-                            <div style="position: absolute; width: 22px; height: 22px; border-bottom: 3px solid #38bdf8; border-right: 3px solid #38bdf8; bottom: -3px; right: -3px;"></div>
-                            
-                            <!-- Reticle Target Tag -->
-                            <div id="reticleTag" style="font-size: 0.72rem; color: #38bdf8; font-weight: 800; background: rgba(15, 23, 42, 0.9); padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px; border: 1px solid rgba(56, 189, 248, 0.4); text-align: center;">
-                                🎯 AWAITING LESION
-                            </div>
-                        </div>
-
-                        <!-- Sub-hud status note -->
-                        <div id="viewfinderPrompt" style="margin-top: 14px; font-size: 0.78rem; color: #94a3b8; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
-                            Hold skin lesion inside viewfinder crosshair • Real-Time YOLO11 Active
-                        </div>
-
-                        <!-- Top-Left Camera Status Badge -->
-                        <div style="position: absolute; top: 12px; left: 14px; display: flex; align-items: center; gap: 6px; background: rgba(0, 0, 0, 0.75); padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; color: #38bdf8; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3);">
-                            <span class="pulse-dot pulse-green" id="viewfinderPulseDot" style="width: 7px; height: 7px;"></span>
-                            <span id="viewfinderBadgeText">AI SCANNER READY</span>
-                        </div>
-                    </div>
-
-                    <!-- 2. Detected / Sample Lesion Image (Shown on lesion detection or condition selection) -->
-                    <img id="detectedLesionCanvasImg" src="" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 2;" />
-
-                    <!-- 3. Camera Stream from Raspberry Pi 5 (Direct Live MJPEG Feed - Overlays on top when connected) -->
-                    <img id="kioskStreamImg" src="<%= isMyTurn ? '/api/scanner/video_feed' : '' %>" alt="Live Raspberry Pi Camera Stream" crossorigin="anonymous" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 3;" onerror="onStreamError()" onload="onStreamLoaded()" />
-                    
-                    <!-- 4. Patient Queue Overlay (Shown when waiting for turn) -->
+                    <!-- Patient Queue Overlay (Shown when waiting for turn) -->
                     <div id="streamOccupiedOverlay" style="display: <%= isMyTurn ? 'none' : 'flex' %>; position: absolute; inset: 0; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 10;">
                         <div style="font-size: 3rem; margin-bottom: 12px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));">⏳</div>
                         <div style="font-size: 1.15rem; font-weight: 800; color: #f8fafc; letter-spacing: -0.01em;">Waiting in Patient Queue</div>
@@ -281,29 +247,6 @@
 
         currentDisease = null;
         currentConfidence = null;
-
-        // Reset Viewfinder Reticle & HUD
-        const lesionImg = document.getElementById('detectedLesionCanvasImg');
-        const reticle = document.getElementById('viewfinderReticle');
-        const tag = document.getElementById('reticleTag');
-        const prompt = document.getElementById('viewfinderPrompt');
-        const bText = document.getElementById('viewfinderBadgeText');
-        const pulse = document.getElementById('viewfinderPulseDot');
-
-        if (lesionImg) lesionImg.style.display = 'none';
-        if (reticle) {
-            reticle.style.borderColor = 'rgba(56, 189, 248, 0.65)';
-            reticle.style.boxShadow = 'none';
-        }
-        if (tag) {
-            tag.innerText = '🎯 AWAITING LESION';
-            tag.style.color = '#38bdf8';
-            tag.style.backgroundColor = 'rgba(15, 23, 42, 0.9)';
-            tag.style.borderColor = 'rgba(56, 189, 248, 0.4)';
-        }
-        if (prompt) prompt.innerText = 'Hold skin lesion inside viewfinder crosshair • Real-Time YOLO11 Active';
-        if (bText) bText.innerText = 'AI SCANNER READY';
-        if (pulse) pulse.className = 'pulse-dot pulse-green';
 
         const diseaseEl = document.getElementById('detectedDiseaseName');
         const noteEl = document.getElementById('detectedStatusNote');
@@ -544,31 +487,10 @@
 
     // Manual Selector for testing / viva presentation
     function onManualConditionChange(val) {
-        const lesionImg = document.getElementById('detectedLesionCanvasImg');
-        const reticle = document.getElementById('viewfinderReticle');
-        const tag = document.getElementById('reticleTag');
-        const prompt = document.getElementById('viewfinderPrompt');
-        const bText = document.getElementById('viewfinderBadgeText');
-        const pulse = document.getElementById('viewfinderPulseDot');
-
         if (val === 'AUTO') {
             consecutiveEmptyCycles = 0;
             currentDisease = null;
             currentConfidence = null;
-            if (lesionImg) lesionImg.style.display = 'none';
-            if (reticle) {
-                reticle.style.borderColor = 'rgba(56, 189, 248, 0.65)';
-                reticle.style.boxShadow = 'none';
-            }
-            if (tag) {
-                tag.innerText = '🎯 AWAITING LESION';
-                tag.style.color = '#38bdf8';
-                tag.style.backgroundColor = 'rgba(15, 23, 42, 0.9)';
-                tag.style.borderColor = 'rgba(56, 189, 248, 0.4)';
-            }
-            if (prompt) prompt.innerText = 'Hold skin lesion inside viewfinder crosshair • Real-Time YOLO11 Active';
-            if (bText) bText.innerText = 'AI SCANNER READY';
-            if (pulse) pulse.className = 'pulse-dot pulse-green';
             resetToStandbyState();
         } else {
             const confidences = {
@@ -581,29 +503,9 @@
             };
             currentDisease = val;
             currentConfidence = confidences[val] || "88.5";
-
-            // Show sample lesion inside the viewfinder reticle!
-            if (lesionImg && sampleImages[val]) {
-                lesionImg.src = sampleImages[val];
-                lesionImg.style.display = 'block';
+            if (isCloudSimActive) {
+                loadSimImage(val);
             }
-            const matched = findRemedy(val);
-            const color = (matched && matched.remedy && matched.remedy.color) || '#ef4444';
-
-            if (reticle) {
-                reticle.style.borderColor = color;
-                reticle.style.boxShadow = `0 0 24px ${color}55`;
-            }
-            if (tag) {
-                tag.innerText = `🔴 ${val.toUpperCase()} [${currentConfidence}%]`;
-                tag.style.color = '#fff';
-                tag.style.backgroundColor = color;
-                tag.style.borderColor = color;
-            }
-            if (prompt) prompt.innerText = `Target Lock: ${val} (${currentConfidence}% Confidence)`;
-            if (bText) bText.innerText = `YOLO11 DETECTED: ${val.toUpperCase()}`;
-            if (pulse) pulse.className = 'pulse-dot pulse-yellow';
-
             updateDetectionOutput(val, currentConfidence);
         }
     }
@@ -756,10 +658,10 @@
     }
 
     function handleTurnActiveState(data) {
-        // Activate live camera stream if not in manual simulation mode
-        if (!isSimulationMode) {
+        // Activate live camera stream if physical Pi stream is active
+        if (!isCloudSimActive) {
             const streamImg = document.getElementById('kioskStreamImg');
-            const streamUrl = data.stream_url || ('/api/scanner/video_feed' + (currentCustomPiIp ? '?pi_url=' + encodeURIComponent(currentCustomPiIp) : ''));
+            const streamUrl = data.stream_url || '/api/scanner/video_feed';
             if (streamImg && (streamImg.style.display === 'none' || !streamImg.src || streamImg.src === window.location.href || !streamImg.src.includes('/api/scanner/video_feed'))) {
                 streamImg.src = streamUrl;
                 streamImg.style.display = 'block';
@@ -908,38 +810,14 @@
         }, 1000);
     }
 
-    function onStreamLoaded() {
-        const img = document.getElementById('kioskStreamImg');
-        if (img) img.style.display = 'block';
-
-        const vfBadge = document.getElementById('viewfinderStatus');
-        if (vfBadge) {
-            vfBadge.className = 'badge badge-success';
-            vfBadge.innerText = 'Live Feed Active';
-        }
-        const bText = document.getElementById('viewfinderBadgeText');
-        if (bText) bText.innerText = 'PI CAMERA STREAM 30 FPS';
-    }
-
     function onStreamError() {
         const img = document.getElementById('kioskStreamImg');
-        if (img) img.style.display = 'none';
-
-        const vfBadge = document.getElementById('viewfinderStatus');
-        if (vfBadge) {
-            vfBadge.className = 'badge badge-success';
-            vfBadge.innerText = 'AI Scanner Active';
-        }
-        const bText = document.getElementById('viewfinderBadgeText');
-        if (bText) bText.innerText = 'AI SCANNER READY';
-
-        // Retry physical camera stream quietly in background
+        if (!img || img.style.display === 'none') return;
         setTimeout(() => {
-            const stream = document.getElementById('kioskStreamImg');
-            if (stream) {
-                stream.src = '/api/scanner/video_feed?t=' + Date.now();
+            if (img.style.display !== 'none') {
+                img.src = '/api/scanner/video_feed?t=' + Date.now();
             }
-        }, 5000);
+        }, 2000);
     }
 
     function openBookingFromBtn(btn) {
