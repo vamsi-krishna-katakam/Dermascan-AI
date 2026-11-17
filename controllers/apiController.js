@@ -89,11 +89,25 @@ exports.getVideoStreamProxy = (req, res) => {
       });
 
       fallbackReq.on('error', () => {
-        if (!res.headersSent) {
-          res.status(502).send('Camera stream currently unavailable from Raspberry Pi.');
-        } else {
-          try { res.end(); } catch (e) {}
-        }
+        const localReq = http.request({
+          hostname: '127.0.0.1',
+          port: 5001,
+          path: '/video_feed',
+          method: 'GET',
+          timeout: 2000
+        }, (lRes) => {
+          lRes.pipe(res);
+        });
+
+        localReq.on('error', () => {
+          if (!res.headersSent) {
+            res.status(502).send('Camera stream currently unavailable from Raspberry Pi.');
+          } else {
+            try { res.end(); } catch (e) {}
+          }
+        });
+
+        localReq.end();
       });
 
       fallbackReq.end();
