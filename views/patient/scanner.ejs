@@ -47,9 +47,35 @@
                 </span>
             </div>
             <div class="card-body">
-                <div style="position: relative; width: 100%; height: 340px; background: #000; border-radius: var(--radius-md); overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                <div id="viewfinderContainer" style="position: relative; width: 100%; height: 340px; background: #0b1324; border-radius: var(--radius-md); overflow: hidden; display: flex; align-items: center; justify-content: center;">
                     <!-- Camera Stream from Raspberry Pi 5 (Direct Live MJPEG Feed) -->
-                    <img id="kioskStreamImg" src="<%= isMyTurn ? '/api/scanner/video_feed' : '' %>" alt="Live Raspberry Pi Camera Stream" crossorigin="anonymous" style="width: 100%; height: 100%; object-fit: contain; display: <%= isMyTurn ? 'block' : 'none' %>;" onerror="onStreamError()" />
+                    <img id="kioskStreamImg" src="<%= isMyTurn ? '/api/scanner/video_feed' : '' %>" alt="Live Raspberry Pi Camera Stream" crossorigin="anonymous" style="width: 100%; height: 100%; object-fit: contain; display: <%= isMyTurn ? 'block' : 'none' %>;" onerror="onStreamError()" onload="onStreamLoaded()" />
+
+                    <!-- Clinical Standby & AI Simulation Overlay (Active when Pi hardware is offline or test demo) -->
+                    <div id="standbyViewfinder" style="display: none; position: absolute; inset: 0; background: radial-gradient(circle at center, #1e293b 0%, #090d16 100%); flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #fff; padding: 20px;">
+                        <img id="simLesionImg" src="" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.9;" />
+
+                        <div id="standbyRadarHud" style="position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                            <div style="width: 150px; height: 150px; border: 2px dashed rgba(56, 189, 248, 0.5); border-radius: 14px; display: flex; align-items: center; justify-content: center; position: relative;">
+                                <div style="position: absolute; width: 18px; height: 18px; border-top: 3px solid #38bdf8; border-left: 3px solid #38bdf8; top: -3px; left: -3px;"></div>
+                                <div style="position: absolute; width: 18px; height: 18px; border-top: 3px solid #38bdf8; border-right: 3px solid #38bdf8; top: -3px; right: -3px;"></div>
+                                <div style="position: absolute; width: 18px; height: 18px; border-bottom: 3px solid #38bdf8; border-left: 3px solid #38bdf8; bottom: -3px; left: -3px;"></div>
+                                <div style="position: absolute; width: 18px; height: 18px; border-bottom: 3px solid #38bdf8; border-right: 3px solid #38bdf8; bottom: -3px; right: -3px;"></div>
+                                <div id="standbyCrosshairLabel" style="font-size: 0.72rem; color: #38bdf8; font-weight: 800; background: rgba(15, 23, 42, 0.85); padding: 3px 10px; border-radius: 6px;">
+                                    AIMING AT LESION
+                                </div>
+                            </div>
+                            <div id="standbySubtext" style="margin-top: 14px; font-size: 0.8rem; color: #94a3b8; font-weight: 600;">
+                                Raspberry Pi Camera Offline • Clinical Standby Active
+                            </div>
+                        </div>
+
+                        <!-- Top-left Camera HUD Badge -->
+                        <div style="position: absolute; top: 12px; left: 14px; z-index: 3; display: flex; align-items: center; gap: 6px; background: rgba(0, 0, 0, 0.7); padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; color: #38bdf8; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3);">
+                            <span class="pulse-dot pulse-yellow" id="streamStatusDot" style="width: 7px; height: 7px;"></span>
+                            <span id="streamStatusText">STANDBY / RETRYING PI</span>
+                        </div>
+                    </div>
                     
                     <!-- Patient Queue Overlay (Shown when waiting for turn) -->
                     <div id="streamOccupiedOverlay" style="display: <%= isMyTurn ? 'none' : 'flex' %>; position: absolute; inset: 0; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 10;">
@@ -66,7 +92,20 @@
                     </div>
                 </div>
 
-                <div style="margin-top: 14px; font-size: 0.78rem; color: var(--text-muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                <!-- Hardware Link Controls (For easy Viva presentation) -->
+                <div style="margin-top: 10px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 6px; font-size: 0.75rem;">
+                        <span style="font-weight: 700; color: var(--text-muted);">Pi Hardware IP:</span>
+                        <input type="text" id="piCustomIpInput" placeholder="10.189.102.108:5000" style="padding: 3px 8px; font-size: 0.75rem; border: 1px solid var(--border); border-radius: 4px; width: 170px;" value="" />
+                        <button type="button" class="btn btn-primary" style="padding: 3px 8px; font-size: 0.72rem;" onclick="reconnectCustomPiIp()">Connect</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <button type="button" class="btn" style="padding: 3px 8px; font-size: 0.72rem; background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe;" onclick="useLocalPi()">Pi Local (5001)</button>
+                        <button type="button" class="btn" style="padding: 3px 8px; font-size: 0.72rem; background: #f0fdf4; color: #15803d; border-color: #bbf7d0;" onclick="testSimMode()">Simulate AI</button>
+                    </div>
+                </div>
+
+                <div style="margin-top: 12px; font-size: 0.78rem; color: var(--text-muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
                     <span>📍 GPS: <b id="liveGpsCoord">16.49433° N, 80.50128° E (5 Sats Locked)</b></span>
                     <span>⚡ Latency: <b id="liveLatencyFps">~280ms (3.5 FPS)</b></span>
                 </div>
@@ -216,6 +255,8 @@
     let consecutiveEmptyCycles = 0;
     let isCapturingSnapshot = false;
     let lastCapturedSnapshotData = null;
+    let isSimulationMode = false;
+    let currentCustomPiIp = '';
 
     // Helper: Case-insensitive / fuzzy match for disease classes
     function findRemedy(name) {
@@ -491,6 +532,8 @@
             consecutiveEmptyCycles = 0;
             currentDisease = null;
             currentConfidence = null;
+            const simImg = document.getElementById('simLesionImg');
+            if (simImg) simImg.style.display = 'none';
             resetToStandbyState();
         } else {
             const confidences = {
@@ -503,9 +546,16 @@
             };
             currentDisease = val;
             currentConfidence = confidences[val] || "88.5";
-            if (isCloudSimActive) {
-                loadSimImage(val);
+
+            // If hardware camera is offline, show sample lesion in viewfinder
+            const simImg = document.getElementById('simLesionImg');
+            if (simImg && sampleImages[val]) {
+                simImg.src = sampleImages[val];
+                simImg.style.display = 'block';
+                const hud = document.getElementById('standbyCrosshairLabel');
+                if (hud) hud.innerText = `${val.toUpperCase()} [${currentConfidence}%]`;
             }
+
             updateDetectionOutput(val, currentConfidence);
         }
     }
@@ -658,10 +708,10 @@
     }
 
     function handleTurnActiveState(data) {
-        // Activate live camera stream if physical Pi stream is active
-        if (!isCloudSimActive) {
+        // Activate live camera stream if not in manual simulation mode
+        if (!isSimulationMode) {
             const streamImg = document.getElementById('kioskStreamImg');
-            const streamUrl = data.stream_url || '/api/scanner/video_feed';
+            const streamUrl = data.stream_url || ('/api/scanner/video_feed' + (currentCustomPiIp ? '?pi_url=' + encodeURIComponent(currentCustomPiIp) : ''));
             if (streamImg && (streamImg.style.display === 'none' || !streamImg.src || streamImg.src === window.location.href || !streamImg.src.includes('/api/scanner/video_feed'))) {
                 streamImg.src = streamUrl;
                 streamImg.style.display = 'block';
@@ -810,14 +860,89 @@
         }, 1000);
     }
 
-    function onStreamError() {
+    function onStreamLoaded() {
+        const standby = document.getElementById('standbyViewfinder');
+        if (standby) standby.style.display = 'none';
         const img = document.getElementById('kioskStreamImg');
-        if (!img || img.style.display === 'none') return;
+        if (img) img.style.display = 'block';
+
+        const vfBadge = document.getElementById('viewfinderStatus');
+        if (vfBadge) {
+            vfBadge.className = 'badge badge-success';
+            vfBadge.innerText = 'Live Feed Active';
+        }
+    }
+
+    function onStreamError() {
+        const standby = document.getElementById('standbyViewfinder');
+        if (standby) standby.style.display = 'flex';
+
+        const dot = document.getElementById('streamStatusDot');
+        if (dot) dot.className = 'pulse-dot pulse-yellow';
+        const stText = document.getElementById('streamStatusText');
+        if (stText) stText.innerText = 'STANDBY / SEARCHING PI';
+
+        const sub = document.getElementById('standbySubtext');
+        if (sub) sub.innerText = 'Raspberry Pi Camera Offline • Clinical Standby Active (Retrying...)';
+
+        // Retry stream after 4 seconds
         setTimeout(() => {
-            if (img.style.display !== 'none') {
-                img.src = '/api/scanner/video_feed?t=' + Date.now();
+            const img = document.getElementById('kioskStreamImg');
+            if (img && !isSimulationMode) {
+                const query = currentCustomPiIp ? `?pi_url=${encodeURIComponent(currentCustomPiIp)}&t=${Date.now()}` : `?t=${Date.now()}`;
+                img.src = '/api/scanner/video_feed' + query;
             }
-        }, 2000);
+        }, 4000);
+    }
+
+    function reconnectCustomPiIp() {
+        const input = document.getElementById('piCustomIpInput');
+        if (!input || !input.value.trim()) return;
+        let val = input.value.trim();
+        if (!val.startsWith('http://') && !val.startsWith('https://')) {
+            val = 'http://' + val;
+        }
+        if (!val.includes('/video_feed')) {
+            val = val.replace(/\/+$/, '') + '/video_feed';
+        }
+        currentCustomPiIp = val;
+        isSimulationMode = false;
+
+        const standby = document.getElementById('standbyViewfinder');
+        if (standby) standby.style.display = 'flex';
+        const sub = document.getElementById('standbySubtext');
+        if (sub) sub.innerText = `Connecting to ${currentCustomPiIp}...`;
+
+        const img = document.getElementById('kioskStreamImg');
+        if (img) {
+            img.src = '/api/scanner/video_feed?pi_url=' + encodeURIComponent(currentCustomPiIp) + '&t=' + Date.now();
+        }
+    }
+
+    function useLocalPi() {
+        const input = document.getElementById('piCustomIpInput');
+        if (input) input.value = 'http://127.0.0.1:5001/video_feed';
+        reconnectCustomPiIp();
+    }
+
+    function testSimMode() {
+        isSimulationMode = true;
+        const standby = document.getElementById('standbyViewfinder');
+        if (standby) standby.style.display = 'flex';
+
+        const dot = document.getElementById('streamStatusDot');
+        if (dot) dot.className = 'pulse-dot pulse-green';
+        const stText = document.getElementById('streamStatusText');
+        if (stText) stText.innerText = 'SIMULATION DEMO ACTIVE';
+
+        // Select a sample condition if none selected
+        const selector = document.getElementById('conditionSelector');
+        if (selector && selector.value === 'AUTO') {
+            selector.value = 'Melanoma';
+            onManualConditionChange('Melanoma');
+        } else if (selector) {
+            onManualConditionChange(selector.value);
+        }
     }
 
     function openBookingFromBtn(btn) {

@@ -45,73 +45,84 @@ exports.getVideoStreamProxy = (req, res) => {
     'Connection': 'close'
   });
 
-  const customUrl = process.env.RPI_STREAM_URL || 'https://apollo-amendments-temple-spencer.trycloudflare.com/video_feed';
-  let client = http;
-  let reqOpts = {
-    hostname: '10.189.102.108',
-    port: 5000,
-    path: '/video_feed',
-    method: 'GET'
-  };
+  // Multi-tier resolution:
+  // 1. Explicit query parameter ?pi_url=
+  // 2. Environment variable RPI_STREAM_URL
+  // 3. Local Pi on same machine (Python Flask on port 5001)
+  // 4. Remote Pi on local LAN (10.189.102.108:5000 or rpi.local:5000)
+  const candidateEndpoints = [];
+  if (req.query && req.query.pi_url) {
+    candidateEndpoints.push(req.query.pi_url);
+  }
+  if (process.env.RPI_STREAM_URL && !process.env.RPI_STREAM_URL.includes('trycloudflare.com')) {
+    candidateEndpoints.push(process.env.RPI_STREAM_URL);
+  }
+  candidateEndpoints.push(
+    'http://127.0.0.1:5001/video_feed',
+    'http://localhost:5001/video_feed',
+    'http://10.189.102.108:5000/video_feed',
+    'http://rpi.local:5000/video_feed'
+  );
 
-  if (customUrl) {
+  let streamConnected = false;
+
+  function tryNextEndpoint(index) {
+    if (index >= candidateEndpoints.length) {
+      if (!res.headersSent) {
+        return res.status(502).send('Camera stream currently unavailable from Raspberry Pi.');
+      } else {
+        try { res.end(); } catch (e) {}
+        return;
+      }
+    }
+
+    const targetUrl = candidateEndpoints[index];
+    let client = http;
+    let reqOpts = {};
+
     try {
-      const parsed = new URL(customUrl);
+      const parsed = new URL(targetUrl);
       client = parsed.protocol === 'https:' ? https : http;
       reqOpts = {
         hostname: parsed.hostname,
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
         path: parsed.pathname + (parsed.search || ''),
-        method: 'GET'
+        method: 'GET',
+        timeout: 2500
       };
-    } catch (e) {}
+    } catch (err) {
+      return tryNextEndpoint(index + 1);
+    }
+
+    const piReq = client.request(reqOpts, (piRes) => {
+      if (piRes.statusCode >= 200 && piRes.statusCode < 300) {
+        streamConnected = true;
+        piRes.pipe(res);
+        piRes.on('error', () => {
+          try { res.end(); } catch (e) {}
+        });
+      } else {
+        tryNextEndpoint(index + 1);
+      }
+    });
+
+    piReq.on('timeout', () => {
+      piReq.destroy();
+      if (!streamConnected) tryNextEndpoint(index + 1);
+    });
+
+    piReq.on('error', () => {
+      if (!streamConnected) tryNextEndpoint(index + 1);
+    });
+
+    req.on('close', () => {
+      piReq.destroy();
+    });
+
+    piReq.end();
   }
 
-  const piReq = client.request(reqOpts, (piRes) => {
-    piRes.pipe(res);
-
-    piRes.on('error', () => {
-      try { res.end(); } catch (e) {}
-    });
-  });
-
-  piReq.on('error', () => {
-    // If custom URL failed or on local LAN fallback to rpi.local
-    if (!customUrl) {
-      const fallbackReq = http.request({
-        hostname: 'rpi.local',
-        port: 5000,
-        path: '/video_feed',
-        method: 'GET',
-        timeout: 5000
-      }, (fbRes) => {
-        fbRes.pipe(res);
-      });
-
-      fallbackReq.on('error', () => {
-        if (!res.headersSent) {
-          res.status(502).send('Camera stream currently unavailable from Raspberry Pi.');
-        } else {
-          try { res.end(); } catch (e) {}
-        }
-      });
-
-      fallbackReq.end();
-      return;
-    }
-
-    if (!res.headersSent) {
-      res.status(502).send('Camera stream currently unavailable from Raspberry Pi.');
-    } else {
-      try { res.end(); } catch (e) {}
-    }
-  });
-
-  req.on('close', () => {
-    piReq.destroy();
-  });
-
-  piReq.end();
+  tryNextEndpoint(0);
 };
 
 // ----------------------------------------------------------------------------
@@ -131,9 +142,18 @@ exports.getSnapshot = async (req, res) => {
   }
 
   const endpoints = [];
-  const tunnelBase = process.env.RPI_STREAM_URL ? new URL(process.env.RPI_STREAM_URL).origin : 'https://apollo-amendments-temple-spencer.trycloudflare.com';
-  endpoints.push(`${tunnelBase}/snapshot.jpg`);
-  endpoints.push('http://10.189.102.108:5000/snapshot.jpg', 'http://rpi.local:5000/snapshot.jpg');
+  if (req.query && req.query.pi_url) {
+    try { endpoints.push(new URL(req.query.pi_url).origin + '/snapshot.jpg'); } catch (e) {}
+  }
+  if (process.env.RPI_STREAM_URL && !process.env.RPI_STREAM_URL.includes('trycloudflare.com')) {
+    try { endpoints.push(new URL(process.env.RPI_STREAM_URL).origin + '/snapshot.jpg'); } catch (e) {}
+  }
+  endpoints.push(
+    'http://127.0.0.1:5001/snapshot.jpg',
+    'http://localhost:5001/snapshot.jpg',
+    'http://10.189.102.108:5000/snapshot.jpg',
+    'http://rpi.local:5000/snapshot.jpg'
+  );
 
   for (const url of endpoints) {
     try {
@@ -189,11 +209,20 @@ exports.getLiveStats = async (req, res) => {
     });
   }
 
-  // Active patient: fetch live stats from Raspberry Pi (or custom RPI_STREAM_URL)
+  // Active patient: fetch live stats from Raspberry Pi (or local Flask port 5001)
   const endpoints = [];
-  const statsTunnelBase = process.env.RPI_STREAM_URL ? new URL(process.env.RPI_STREAM_URL).origin : 'https://apollo-amendments-temple-spencer.trycloudflare.com';
-  endpoints.push(`${statsTunnelBase}/api/stats`);
-  endpoints.push('http://10.189.102.108:5000/api/stats', 'http://rpi.local:5000/api/stats');
+  if (req.query && req.query.pi_url) {
+    try { endpoints.push(new URL(req.query.pi_url).origin + '/api/stats'); } catch (e) {}
+  }
+  if (process.env.RPI_STREAM_URL && !process.env.RPI_STREAM_URL.includes('trycloudflare.com')) {
+    try { endpoints.push(new URL(process.env.RPI_STREAM_URL).origin + '/api/stats'); } catch (e) {}
+  }
+  endpoints.push(
+    'http://127.0.0.1:5001/api/stats',
+    'http://localhost:5001/api/stats',
+    'http://10.189.102.108:5000/api/stats',
+    'http://rpi.local:5000/api/stats'
+  );
 
   for (const url of endpoints) {
     try {
@@ -315,6 +344,8 @@ exports.streamLiveEvents = (req, res) => {
       }
 
       const endpoints = [
+        'http://127.0.0.1:5001/api/stats',
+        'http://localhost:5001/api/stats',
         'http://10.189.102.108:5000/api/stats',
         'http://rpi.local:5000/api/stats'
       ];
